@@ -1,4 +1,4 @@
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
 """
 WARNING: THIS MODULE EXISTS SOLELY TO PROVIDE BACKWARDS-COMPATIBILITY.
 
@@ -11,7 +11,15 @@ function/method instead.
 #
 # Distributed under the terms of the MIT license.
 #
+from __future__ import absolute_import, unicode_literals
+
 __version__ = '$Id$'
 
 
-from pywikibot import User
+from pywikibot.page import User
+from pywikibot.tools import ModuleDeprecationWrapper
+
+__all__ = ('User',)
+
+wrapper = ModuleDeprecationWrapper(__name__)
+wrapper._add_deprecated_attr('User', replacement_name='pywikibot.User')

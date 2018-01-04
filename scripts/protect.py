@@ -1,198 +1,269 @@
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 """
 This script can be used to protect and unprotect pages en masse.
+
 Of course, you will need an admin account on the relevant wiki.
-
-
 These command line parameters can be used to specify which pages to work on:
 
 &params;
 
 Furthermore, the following command line parameters are supported:
 
--always:          Don't prompt to protect pages, just do it.
+-always           Don't prompt to protect pages, just do it.
 
--summary:         Supply a custom edit summary.
+-summary:         Supply a custom edit summary. Tries to generate summary from
+                  the page selector. If no summary is supplied or couldn't
+                  determine one from the selector it'll ask for one.
 
--unprotect:       Actually unprotect pages instead of protecting
+-expiry:          Supply a custom protection expiry, which defaults to
+                  indefinite. Any string understandable by MediaWiki, including
+                  relative and absolute, is acceptable. See:
+                  https://www.mediawiki.org/wiki/API:Protect#Parameters
 
--edit:PROTECTION_LEVEL Set edit protection level to PROTECTION_LEVEL
+-unprotect        Acts like "default:all"
 
--move:PROTECTION_LEVEL Set move protection level to PROTECTION_LEVEL
+-default:         Sets the default protection level (default 'sysop'). If no
+                  level is defined it doesn't change unspecified levels.
 
-## Without support ##
-## -create:PROTECTION_LEVEL Set move protection level to PROTECTION_LEVEL ##
+-[type]:[level]   Set [type] protection level to [level]
 
-Values for PROTECTION_LEVEL are: sysop, autoconfirmed, none.
-If an operation parameter (edit, move or create) is not specified, default
-protection level is 'sysop' (or 'none' if -unprotect).
+Usual values for [level] are: sysop, autoconfirmed, all; further levels may be
+provided by some wikis.
+
+For all protection types (edit, move, etc.) it chooses the default protection
+level. This is "sysop" or "all" if -unprotect was selected. If multiple
+-unprotect or -default are used, only the last occurrence is applied.
 
 Usage: python protect.py <OPTIONS>
 
 Examples:
 
-Protect everything in the category "To protect" prompting.
-    python protect.py -cat:"To protect" -always
+Protect everything in the category 'To protect' prompting.
 
-Unprotect all pages listed in text file "unprotect.txt" without prompting.
-    python protect.py -file:unprotect.txt -unprotect
+    python pwb.py protect -cat:"To protect"
+
+Unprotect all pages listed in text file 'unprotect.txt' without prompting.
+
+    python pwb.py protect -file:unprotect.txt -unprotect -always
 """
-
 #
 # Written by https://it.wikisource.org/wiki/Utente:Qualc1
 # Created by modifying delete.py
 #
-# (c) Pywikibot team, 2008-2014
+# (C) Pywikibot team, 2008-2017
 #
 # Distributed under the terms of the MIT license.
 #
-__version__ = '$Id$'
-#
+from __future__ import absolute_import, unicode_literals
 
 import pywikibot
-from pywikibot import i18n
-from pywikibot import pagegenerators
+from pywikibot import i18n, pagegenerators
+from pywikibot.bot import SingleSiteBot
+from pywikibot.tools.formatter import color_format
 
 # This is required for the text that is shown when you run this script
 # with the parameter -help.
 docuReplacements = {
-    '&params;':     pagegenerators.parameterHelp,
+    '&params;': pagegenerators.parameterHelp,
 }
 
 
-class ProtectionRobot:
-    """ This bot allows protection of pages en masse. """
+class ProtectionRobot(SingleSiteBot):
 
-    def __init__(self, generator, summary, always=False, unprotect=False,
-                 edit='sysop', move='sysop', create='sysop'):
-        """
-        Arguments:
-            * generator - A page generator.
-            * always - Protect without prompting?
-            * edit, move, create - protection level for these operations
-            * unprotect - unprotect pages (and ignore edit, move, create params)
+    """This bot allows protection of pages en masse."""
 
+    def __init__(self, generator, protections, site=None, **kwargs):
         """
+        Create a new ProtectionRobot.
+
+        @param generator: the page generator
+        @type generator: generator
+        @param protections: protections as a dict with "type": "level"
+        @type protections: dict
+        @param site: The site to which the protections apply. By default it's
+            using the site of the first page returned from the generator. If
+            True it's using the configured site.
+        @type site: None, True or Site
+        @param kwargs: additional arguments directly feed to Bot.__init__()
+        """
+        self.availableOptions.update({
+            'summary': None,
+            'expiry': None,
+        })
+        super(ProtectionRobot, self).__init__(site=site, **kwargs)
         self.generator = generator
-        self.summary = summary
-        self.prompt = not always
-        self.unprotect = unprotect
-        self.edit = edit
-        self.move = move
+        self.protections = protections
 
-    def run(self):
-        """ Start the bot's action.
-        Loop through everything in the page generator and (un)protect it.
+    def treat(self, page):
+        """Run the bot's action on each page.
 
+        Bot.run() loops through everything in the page generator and applies
+        the protections using this function.
         """
-        for page in self.generator:
-            pywikibot.output(u'Processing page %s' % page.title())
-            page.protect(unprotect=self.unprotect, reason=self.summary,
-                         prompt=self.prompt, edit=self.edit, move=self.move)
+        self.current_page = page
+        if not self.user_confirm(
+                'Do you want to change the protection level of %s?'
+                % page.title(asLink=True, forceInterwiki=True)):
+            return
+        applicable = page.applicable_protections()
+        protections = dict(
+            prot for prot in self.protections.items() if prot[0] in applicable)
+        page.protect(reason=self.getOption('summary'),
+                     expiry=self.getOption('expiry'),
+                     protections=protections)
 
 
-def choiceProtectionLevel(operation, default):
-    """ Asks a valid protection level for "operation".
-    Returns the protection level chosen by user.
+def check_protection_level(operation, level, levels, default=None):
+    """Check if the protection level is valid or ask if necessary.
 
+    @return: a valid protection level
+    @rtype: string
     """
-    default = default[0]
-    firstChar = map(lambda level: level[0], protectionLevels)
-    choiceChar = pywikibot.inputChoice('Choice a protection level to %s:'
-                                       % operation,
-                                       protectionLevels, firstChar,
-                                       default=default)
-    for level in protectionLevels:
-        if level.startswith(choiceChar):
-            return level
+    if level not in levels:
+        first_char = []
+        default_char = None
+        num = 1
+        for level in levels:
+            for c in level:
+                if c not in first_char:
+                    first_char.append(c)
+                    break
+            else:
+                first_char.append(str(num))
+                num += 1
+            if level == default:
+                default_char = first_char[-1]
+        choice = pywikibot.input_choice('Choice a protection level to %s:'
+                                        % operation, zip(levels, first_char),
+                                        default=default_char)
+
+        return levels[first_char.index(choice)]
+    else:
+        return level
 
 
 def main(*args):
-    global protectionLevels
-    protectionLevels = ['sysop', 'autoconfirmed', 'none']
+    """
+    Process command line arguments and invoke bot.
 
-    # This factory is responsible for processing command line arguments
-    # that are also used by other scripts and that determine on which pages
-    # to work on.
-    pageName = ''
-    summary = None
-    always = False
+    If args is an empty list, sys.argv is used.
+
+    @param args: command line arguments
+    @type args: list of unicode
+    """
+    options = {}
+    message_properties = {}
     generator = None
-    edit = ''
-    move = ''
-    defaultProtection = 'sysop'
+    protections = {}
+    default_level = 'sysop'
+    default_summaries = {
+        'cat': 'category',
+        'links': 'links',
+        'ref': 'ref',
+        'imageused': 'images',
+        'file': 'simple',
+    }
 
     # read command line parameters
-    local_args = pywikibot.handleArgs(*args)
+    local_args = pywikibot.handle_args(args)
     genFactory = pagegenerators.GeneratorFactory()
-    mysite = pywikibot.Site()
+    site = pywikibot.Site()
 
+    generator_type = None
+    protection_levels = set(site.protection_levels())
+    protection_types = site.protection_types()
+    if '' in protection_levels:
+        protection_levels.add('all')
     for arg in local_args:
         if arg == '-always':
-            always = True
+            options['always'] = True
         elif arg.startswith('-summary'):
             if len(arg) == len('-summary'):
-                summary = pywikibot.input(u'Enter a reason for the protection:')
+                # fill dummy value to prevent automatic generation
+                options['summary'] = None
             else:
-                summary = arg[len('-summary:'):]
+                options['summary'] = arg[len('-summary:'):]
+        elif arg.startswith('-expiry'):
+            if len(arg) == len('-expiry'):
+                options['expiry'] = pywikibot.input(
+                    'Enter a protection expiry:')
+            else:
+                options['expiry'] = arg[len('-expiry:'):]
         elif arg.startswith('-images'):
-            pywikibot.output('\n\03{lightred}-image option is deprecated. '
-                             'Please use -imagelinks instead.\03{default}\n')
+            pywikibot.output(color_format(
+                '\n{lightred}-image option is deprecated. '
+                'Please use -imagelinks instead.{default}\n'))
             local_args.append('-imagelinks' + arg[7:])
         elif arg.startswith('-unprotect'):
-            defaultProtection = 'none'
-        elif arg.startswith('-edit'):
-            edit = arg[len('-edit:'):]
-            if edit not in protectionLevels:
-                edit = choiceProtectionLevel('edit', defaultProtection)
-        elif arg.startswith('-move'):
-            move = arg[len('-move:'):]
-            if move not in protectionLevels:
-                move = choiceProtectionLevel('move', defaultProtection)
-        elif arg.startswith('-create'):
-            create = arg[len('-create:'):]
-            if create not in protectionLevels:
-                create = choiceProtectionLevel('create', defaultProtection)
+            default_level = 'all'
+        elif arg.startswith('-default'):
+            if len(arg) == len('-default'):
+                default_level = 'sysop'
+            else:
+                default_level = arg[len('-default:'):]
         else:
-            genFactory.handleArg(arg)
-            found = arg.find(':') + 1
-            if found:
-                pageName = arg[found:]
+            is_p_type = False
+            if arg.startswith('-'):
+                delimiter = arg.find(':')
+                if delimiter > 0:
+                    p_type_arg = arg[1:delimiter]
+                    level = arg[delimiter + 1:]
+                    if p_type_arg in protection_types:
+                        protections[p_type_arg] = level
+                        is_p_type = True
+            if not is_p_type:
+                if not genFactory.handleArg(arg):
+                    raise ValueError('Unknown parameter "{0}"'.format(arg))
+                found = arg.find(':')
+                if found:
+                    message_properties.update({'cat': arg[found + 1:],
+                                               'page': arg[found + 1:]})
 
-        if not summary:
-            if pageName:
-                if arg.startswith('cat') or arg.startswith('subcats'):
-                    summary = i18n.twtranslate(mysite, 'protect-category',
-                                               {'cat': pageName})
-                elif arg.startswith('links'):
-                    summary = i18n.twtranslate(mysite, 'protect-links',
-                                               {'page': pageName})
-                elif arg.startswith('ref'):
-                    summary = i18n.twtranslate(mysite, 'protect-ref',
-                                               {'page': pageName})
-                elif arg.startswith('imageused'):
-                    summary = i18n.twtranslate(mysite, 'protect-images',
-                                               {'page': pageName})
-            elif arg.startswith('file'):
-                summary = i18n.twtranslate(mysite, 'protect-simple')
+                if 'summary' not in options:
+                    generator_type = arg[1:found] if found > 0 else arg[1:]
+
+    if generator_type in default_summaries:
+        message_type = default_summaries[generator_type]
+        if message_type == 'simple' or message_properties:
+            if default_level == 'all':
+                options['summary'] = i18n.twtranslate(
+                    site, 'unprotect-{0}'.format(message_type),
+                    message_properties)
+            else:
+                options['summary'] = i18n.twtranslate(
+                    site, 'protect-{0}'.format(message_type),
+                    message_properties)
 
     generator = genFactory.getCombinedGenerator()
     # We are just protecting pages, so we have no need of using a preloading
     # page generator to actually get the text of those pages.
     if generator:
-        if summary is None:
-            summary = pywikibot.input(u'Enter a reason for the %sprotection:'
-                                      % ['', 'un'][protectionLevels == 'none'])
-        if not edit:
-            edit = defaultProtection
-        if not move:
-            move = defaultProtection
-        bot = ProtectionRobot(generator, summary, always, edit=edit, move=move)
+        if default_level:
+            default_level = check_protection_level('Default level',
+                                                   default_level,
+                                                   protection_levels)
+        # set the default value for all
+        # None (not the string 'none') will be ignored by Site.protect()
+        combined_protections = dict(
+            (p_type, default_level) for p_type in protection_types)
+        for p_type, level in protections.items():
+            level = check_protection_level(p_type, level, protection_levels,
+                                           default_level)
+            # '' is equivalent to 'all'
+            if level == 'none' or level == '':
+                level = 'all'
+            combined_protections[p_type] = level
+        if not options.get('summary'):
+            options['summary'] = pywikibot.input(
+                u'Enter a reason for the protection change:')
+        bot = ProtectionRobot(generator, combined_protections, site, **options)
         bot.run()
+        return True
     else:
-        # Show help text from the top of this file
-        pywikibot.showHelp()
+        pywikibot.bot.suggest_help(missing_generator=True)
+        return False
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

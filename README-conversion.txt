@@ -1,7 +1,7 @@
 This is a guide to converting bot scripts from version 1 of the
-Pywikibot framework to version 2.
+Pywikibot framework to version 3.
 
-Most importantly, note that the version 2 framework *only* supports wikis
+Most importantly, note that the version 3 framework *only* supports wikis
 using MediaWiki v.1.14 or higher software.  If you need to access a wiki that
 uses older software, you should continue using version 1 for this purpose.
 
@@ -42,24 +42,15 @@ Just call it:
 pwb.py maintenance/compat2core [<script to convert>]
 and follow the instructions and hints.
 
-== Python librairies ==
+== Python libraries ==
 
 [Note: the goal will be to package pywikibot with setuptools easy_install,
 so that these dependencies will be loaded automatically when the package is
 installed, and users won't need to worry about this...]
 
-To run pywikibot, you will need the httplib2 and simplejson:
-packages--
-* httplib2   : https://github.com/jcgregorio/httplib2
-* simplejson : http://svn.red-bean.com/bob/simplejson/tags/simplejson-1.7.1/docs/index.html
+To run pywikibot, you will need the requests package:
 
-or, if you already have setuptools installed, just execute
-'easy_install httplib2' and 'easy_install simplejson'
-
-If you run into errors involving httplib2.urlnorm, update httplib2 to 0.4.0
-(Ubuntu package python-httlib2, for example, is outdated).  Note that
-httplib2 will run under Python 2.6, but will emit DeprecationWarnings (which
-are annoying but don't affect the ability to use the package).
+It may be installed using pip or easy_install.
 
 == Page objects ==
 
@@ -73,7 +64,7 @@ string found between [[ and ]] delimiters.  The new Link object (more on
 this below) handles link parsing and interpretation that doesn't require
 access to the wiki server.
 
-A third syntax allows easy conversion from a Page object to an ImagePage or
+A third syntax allows easy conversion from a Page object to a FilePage or
 Category, or vice versa: e.g., Category(pageobj) converts a Page to a
 Category, as long as the page is in the category namespace.
 
@@ -98,10 +89,14 @@ If you call them, they will print a warning and do nothing else:
 The following methods have had their outputs changed:
 
 - getVersionHistory(): Returns a pywikibot.Timestamp object instead of a MediaWiki one
+- templatesWithParams(): Returns a list of tuples with two items. The first item is
+    a Page object of the template, the second is a list of parameters. In compat we have
+    a list of tuples with two items. The first item is the template title.
 
-=== ImagePage objects ===
+=== FilePage objects ===
 
-For ImagePage objects, the getFileMd5Sum() method is deprecated; it is
+The old ImagePage class has been renamed into FilePage.
+For FilePage objects, the getFileMd5Sum() method is deprecated; it is
 recommended to replace it with getFileSHA1Sum(), because MediaWiki now
 stores the SHA1 hash of images.
 
@@ -124,8 +119,34 @@ The User object has been moved from the userlib module to the pywikibot
 namespace. Any references to "userlib.User" can be replaced by
 "pywikibot.User", but the old form is retained for backwards-compatibility.
 
-The following changes have occured in the User object:
+The following changes have occurred in the User object:
 
 - contributions(): returns a pywikibot.Timestamp object instead of a Mediawiki one
 
-# MORE TO COME #
+== apispec library and Blocks objects ==
+
+Some apispec functionality could be replaced with other methods:
+
+    iso() -> Timestamp.isoformat()
+    uniso() -> Timestamp.strftime('%Y-%m-%d %H:%M:%S')
+    dt() -> Timestamp.totimestampformat()
+    duration() -> BlockEntry.duration()
+
+    Blocks.empty() -> (* obsolete parameter cleanup *)
+    Blocks.query() -> site.blocks() or site.logevents('block')
+    Blocks.IPsortkey() -> (* sort key, not needed * )
+    Blocks.allblocks() ->  site.blocks() or site.logevents('block')
+    Blocks.user() -> site.blocks(user=user)
+    Blocks.IP() -> site.blocks(iprange=IP)
+
+=== Command-line arguments ===
+
+Scripts that supported unnamed arguments as titles of pages on which to work,
+now require that those titles be written as standard pagegenerators, e.g.:
+
+    python script.py -page:"A title"
+
+while unlink.py and other scripts that required page titles as main arguments
+now need only that the titles be wrapped in quotes, as:
+
+    python unlink.py "A title"

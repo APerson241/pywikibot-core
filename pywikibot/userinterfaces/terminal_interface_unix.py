@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
+"""User interface for unix terminals."""
 #
-# (C) Pywikibot team, 2003-2014
+# (C) Pywikibot team, 2003-2016
 #
 # Distributed under the terms of the MIT license.
 #
+from __future__ import absolute_import, unicode_literals
+
 __version__ = '$Id$'
 
+import re
 import sys
-from . import terminal_interface_base
+
+from pywikibot.userinterfaces import terminal_interface_base
 
 unixColors = {
     'default':     chr(27) + '[0m',     # Unix end tag to switch back to default
@@ -31,23 +36,38 @@ unixColors = {
 
 
 class UnixUI(terminal_interface_base.UI):
-    def printColorized(self, text, targetStream):
-        totalcount = 0
-        for key, value in unixColors.items():
-            ckey = '\03{%s}' % key
-            totalcount += text.count(ckey)
-            text = text.replace(ckey, value)
 
-        if totalcount > 0:
-            # just to be sure, reset the color
-            text += unixColors['default']
+    """User interface for unix terminals."""
 
-        # .encoding does not mean we can write unicode
-        # to the stream pre-2.7.
-        if sys.version_info >= (2, 7) and \
-           hasattr(targetStream, 'encoding') and \
-           targetStream.encoding:
-            text = text.encode(targetStream.encoding, 'replace').decode(targetStream.encoding)
-            targetStream.write(text)
-        else:
-            targetStream.write(text.encode(self.encoding, 'replace'))
+    def support_color(self, target_stream):
+        """Return that the target stream supports colors."""
+        return True
+
+    def make_unix_bg_color(self, color):
+        """Obtain background color from foreground color."""
+        code = re.search(r'(?<=\[)\d+', color).group()
+        return chr(27) + '[' + str(int(code) + 10) + 'm'
+
+    def encounter_color(self, color, target_stream):
+        """Write the unix color directly to the stream."""
+        fg, bg = self.divide_color(color)
+        fg = unixColors[fg]
+        self._write(fg, target_stream)
+        if bg is not None:
+            bg = unixColors[bg]
+            self._write(self.make_unix_bg_color(bg), target_stream)
+
+    def _write(self, text, target_stream):
+        """Optionally encode and write the text to the target stream."""
+        targetStream = target_stream
+        if sys.version_info[0] == 2:
+            # .encoding does not mean we can write unicode
+            # to the stream pre-2.7.
+            if (sys.version_info >= (2, 7) and
+                    hasattr(targetStream, 'encoding') and
+                    targetStream.encoding):
+                text = text.encode(targetStream.encoding, 'replace').decode(
+                    targetStream.encoding)
+            else:
+                text = text.encode(self.encoding, 'replace')
+        targetStream.write(text)

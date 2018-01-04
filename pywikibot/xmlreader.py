@@ -1,6 +1,7 @@
-# -*- coding: utf-8  -*-
-
+# -*- coding: utf-8 -*-
 """
+XML reading module.
+
 Each XmlEntry object represents a page, as read from an XML source
 
 The XmlDump class reads a pages_current XML dump (like the ones offered on
@@ -12,20 +13,27 @@ XmlEntry objects which can be used by other bots.
 #
 # Distributed under the terms of the MIT license.
 #
+from __future__ import absolute_import, unicode_literals
+
 __version__ = '$Id$'
 #
 
-import threading
 import re
+import threading
+
 from xml.etree.cElementTree import iterparse
+
 import xml.sax
+
+from pywikibot.tools import open_archive
 
 
 def parseRestrictions(restrictions):
     """
-    Parses the characters within a restrictions tag and returns
-    strings representing user groups allowed to edit and to move
-    a page, where None means there are no restrictions.
+    Parse the characters within a restrictions tag.
+
+    Returns strings representing user groups allowed to edit and
+    to move a page, where None means there are no restrictions.
     """
     if not restrictions:
         return None, None
@@ -43,14 +51,14 @@ def parseRestrictions(restrictions):
     return editRestriction, moveRestriction
 
 
-class XmlEntry:
+class XmlEntry(object):
 
-    """
-    Represents a page.
-    """
+    """Represent a page."""
+
     def __init__(self, title, ns, id, text, username, ipedit, timestamp,
                  editRestriction, moveRestriction, revisionid, comment,
                  redirect):
+        """Constructor."""
         # TODO: there are more tags we can read.
         self.title = title
         self.ns = ns
@@ -69,32 +77,41 @@ class XmlEntry:
 class XmlParserThread(threading.Thread):
 
     """
-    This XML parser will run as a single thread. This allows the XmlDump
+    XML parser that will run as a single thread.
+
+    This allows the XmlDump
     generator to yield pages before the parser has finished reading the
     entire dump.
 
     There surely are more elegant ways to do this.
     """
+
     def __init__(self, filename, handler):
+        """Constructor."""
         threading.Thread.__init__(self)
         self.filename = filename
         self.handler = handler
 
     def run(self):
+        """Parse the file in a single thread."""
         xml.sax.parse(self.filename, self.handler)
 
 
 class XmlDump(object):
 
     """
-    Represents an XML dump file. Reads the local file at initialization,
+    Represents an XML dump file.
+
+    Reads the local file at initialization,
     parses it, and offers access to the resulting XmlEntries via a generator.
 
     @param allrevisions: boolean
         If True, parse all revisions instead of only the latest one.
         Default: False.
     """
+
     def __init__(self, filename, allrevisions=False):
+        """Constructor."""
         self.filename = filename
         if allrevisions:
             self._parse = self._parse_all
@@ -102,38 +119,26 @@ class XmlDump(object):
             self._parse = self._parse_only_latest
 
     def parse(self):
-        """Generator using cElementTree iterparse function"""
-        if self.filename.endswith('.bz2'):
-            import bz2
-            source = bz2.BZ2File(self.filename)
-        elif self.filename.endswith('.gz'):
-            import gzip
-            source = gzip.open(self.filename)
-        elif self.filename.endswith('.7z'):
-            import subprocess
-            source = subprocess.Popen('7za e -bd -so %s 2>/dev/null'
-                                      % self.filename,
-                                      shell=True,
-                                      stdout=subprocess.PIPE,
-                                      bufsize=65535).stdout
-        else:
-            # assume it's an uncompressed XML file
-            source = open(self.filename)
-        context = iterparse(source, events=("start", "end", "start-ns"))
-        self.root = None
+        """Generator using cElementTree iterparse function."""
+        with open_archive(self.filename) as source:
+            # iterparse's event must be a str but they are unicode with
+            # unicode_literals in Python 2
+            context = iterparse(source, events=(str('start'), str('end'),
+                                                str('start-ns')))
+            self.root = None
 
-        for event, elem in context:
-            if event == "start-ns" and elem[0] == "":
-                self.uri = elem[1]
-                continue
-            if event == "start" and self.root is None:
-                self.root = elem
-                continue
-            for rev in self._parse(event, elem):
-                yield rev
+            for event, elem in context:
+                if event == "start-ns" and elem[0] == "":
+                    self.uri = elem[1]
+                    continue
+                if event == "start" and self.root is None:
+                    self.root = elem
+                    continue
+                for rev in self._parse(event, elem):
+                    yield rev
 
     def _parse_only_latest(self, event, elem):
-        """Parser that yields only the latest revision"""
+        """Parser that yields only the latest revision."""
         if event == "end" and elem.tag == "{%s}page" % self.uri:
             self._headers(elem)
             revision = elem.find("{%s}revision" % self.uri)
@@ -142,7 +147,7 @@ class XmlDump(object):
             self.root.clear()
 
     def _parse_all(self, event, elem):
-        """Parser that yields all revisions"""
+        """Parser that yields all revisions."""
         if event == "start" and elem.tag == "{%s}page" % self.uri:
             self._headers(elem)
         if event == "end" and elem.tag == "{%s}revision" % self.uri:
@@ -151,6 +156,7 @@ class XmlDump(object):
             self.root.clear()
 
     def _headers(self, elem):
+        """Extract headers from XML chunk."""
         self.title = elem.findtext("{%s}title" % self.uri)
         self.ns = elem.findtext("{%s}ns" % self.uri)
         self.pageid = elem.findtext("{%s}id" % self.uri)
@@ -160,7 +166,7 @@ class XmlDump(object):
             self.restrictions)
 
     def _create_revision(self, revision):
-        """Create a Single revision"""
+        """Create a Single revision."""
         revisionid = revision.findtext("{%s}id" % self.uri)
         timestamp = revision.findtext("{%s}timestamp" % self.uri)
         comment = revision.findtext("{%s}comment" % self.uri)

@@ -1,89 +1,85 @@
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
+"""Family module for Wikiquote."""
+#
+# (C) Pywikibot team, 2005-2017
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
+
 from pywikibot import family
 
 __version__ = '$Id$'
 
 
 # The Wikimedia family that is known as Wikiquote
-class Family(family.WikimediaFamily):
+class Family(family.SubdomainFamily, family.WikimediaFamily):
+
+    """Family class for Wikiquote."""
+
+    name = 'wikiquote'
+
+    closed_wikis = [
+        # See https://noc.wikimedia.org/conf/highlight.php?file=closed.dblist
+        'als', 'am', 'ang', 'ast', 'bm', 'co', 'cr', 'ga', 'kk',
+        'kr', 'ks', 'kw', 'lb', 'na', 'nds', 'qu', 'simple',
+        'tk', 'tt', 'ug', 'vo', 'za', 'zh_min_nan',
+    ]
+
+    removed_wikis = [
+        # See https://noc.wikimedia.org/conf/highlight.php?file=deleted.dblist
+        'tokipona',
+    ]
+
     def __init__(self):
-        super(Family, self).__init__()
-        self.name = 'wikiquote'
-
+        """Constructor."""
         self.languages_by_size = [
-            'pl', 'en', 'it', 'ru', 'de', 'pt', 'es', 'fr', 'cs', 'sk', 'bg',
-            'bs', 'tr', 'uk', 'sl', 'he', 'fa', 'lt', 'eo', 'el', 'ca', 'zh',
-            'id', 'hu', 'fi', 'sv', 'li', 'nl', 'hr', 'nn', 'ja', 'no', 'az',
-            'sa', 'hy', 'ar', 'et', 'ko', 'gl', 'ml', 'cy', 'ka', 'sr', 'ro',
-            'ku', 'te', 'th', 'da', 'eu', 'ta', 'is', 'vi', 'af', 'sq', 'hi',
-            'kn', 'la', 'be', 'br', 'mr', 'ur', 'uz', 'zh-min-nan', 'gu', 'su',
-            'wo', 'ky', 'am',
+            'en', 'it', 'pl', 'ru', 'cs', 'fa', 'de', 'pt', 'es', 'uk', 'sk',
+            'fr', 'bs', 'he', 'tr', 'fi', 'ca', 'lt', 'th', 'bg', 'sl', 'eo',
+            'hy', 'el', 'nn', 'hr', 'id', 'zh', 'hu', 'su', 'li', 'az', 'ar',
+            'ko', 'nl', 'ja', 'gu', 'sv', 'sr', 'gl', 'ur', 'te', 'ta', 'cy',
+            'la', 'no', 'ml', 'vi', 'et', 'kn', 'ku', 'be', 'eu', 'ro', 'hi',
+            'ka', 'da', 'sa', 'is', 'sq', 'mr', 'br', 'af', 'uz', 'zh-min-nan',
+            'wo', 'ky',
         ]
 
-        self.langs = dict([(lang, '%s.wikiquote.org' % lang)
-                           for lang in self.languages_by_size])
+        super(Family, self).__init__()
 
-        # Global bot allowed languages on https://meta.wikimedia.org/wiki/Bot_policy/Implementation#Current_implementation
-        self.cross_allowed = [
-            'af', 'am', 'ar', 'az', 'be', 'bg', 'br', 'bs', 'ca', 'cs', 'da',
-            'el', 'eo', 'es', 'et', 'eu', 'fa', 'fi', 'fr', 'gl', 'he', 'hi',
-            'hu', 'hy', 'id', 'is', 'it', 'ja', 'ka', 'kn', 'ku', 'ky', 'la',
-            'li', 'lt', 'ml', 'mr', 'nl', 'nn', 'no', 'pt', 'ro', 'ru', 'sk',
-            'sl', 'sq', 'sr', 'su', 'sv', 'ta', 'te', 'tr', 'uk', 'uz', 'vi',
-            'wo', 'zh',
-        ]
-
-        # Which languages have a special order for putting interlanguage links,
-        # and what order is it? If a language is not in interwiki_putfirst,
-        # alphabetical order on language code is used. For languages that are in
-        # interwiki_putfirst, interwiki_putfirst is checked first, and
-        # languages are put in the order given there. All other languages are
-        # put after those, in code-alphabetical order.
-        self.interwiki_putfirst = {
-            'en': self.alphabetic,
-            'fi': self.alphabetic,
-            'fr': self.alphabetic,
-            'he': ['en'],
-            'hu': ['en'],
-            'pl': self.alphabetic,
-            'simple': self.alphabetic,
-            'pt': self.alphabetic,
+        self.category_redirect_templates = {
+            '_default': (),
+            'ar': ('قالب:تحويل تصنيف',),
+            'en': ('Category redirect',),
+            'ro': ('Redirect categorie',),
+            'sq': ('Kategori e zhvendosur',),
+            'uk': ('Categoryredirect',),
         }
 
-        self.obsolete = {
-            'als': None,  # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Alemannic_Wikiquote
-            'ang': None,  # https://bugzilla.wikimedia.org/show_bug.cgi?id=29150
-            'ast': None,  # https://bugzilla.wikimedia.org/show_bug.cgi?id=28964
-            'bm': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Bambara_Wikiquote
-            'co': None,
-            'cr': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Nehiyaw_Wikiquote
-            'dk': 'da',
-            'ga': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Gaeilge_Wikiquote
-            'jp': 'ja',
-            'kk': None,   # https://bugzilla.wikimedia.org/show_bug.cgi?id=20325
-            'kr': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Kanuri_Wikiquote
-            'ks': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Kashmiri_Wikiquote
-            'kw': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Kernewek_Wikiquote
-            'lb': None,
-            'minnan': 'zh-min-nan',
-            'na': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Nauruan_Wikiquote
-            'nb': 'no',
-            'nds': None,  # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Low_Saxon_Wikiquote
-            'qu': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Quechua_Wikiquote
-            'simple': 'en',  # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Simple_English_(3)_Wikiquote
-            'tk': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Turkmen_Wikiquote
-            'tokipona': None,
-            'tt': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Tatar_Wikiquote
-            'ug': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Oyghurque_Wikiquote
-            'vo': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Volapuk_Wikiquote
-            'za': None,   # https://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Zhuang_Wikiquote
-            'zh-tw': 'zh',
-            'zh-cn': 'zh'
+        # Global bot allowed languages on
+        # https://meta.wikimedia.org/wiki/BPI#Current_implementation
+        # & https://meta.wikimedia.org/wiki/Special:WikiSets/2
+        self.cross_allowed = [
+            'af', 'ar', 'az', 'be', 'bg', 'br', 'bs', 'ca', 'cs',
+            'cy', 'da', 'el', 'eo', 'es', 'et', 'eu', 'fa', 'fi',
+            'fr', 'gl', 'gu', 'he', 'hi', 'hu', 'hy', 'id', 'is',
+            'it', 'ja', 'ka', 'kn', 'ko', 'ku', 'ky', 'la', 'li',
+            'lt', 'ml', 'mr', 'nl', 'nn', 'no', 'pt', 'ro', 'ru',
+            'sk', 'sl', 'sq', 'sr', 'su', 'sv', 'ta', 'te', 'tr',
+            'uk', 'ur', 'uz', 'vi', 'wo', 'zh',
+        ]
+
+        # Subpages for documentation.
+        # TODO: List is incomplete, to be completed for missing languages.
+        self.doc_subpages = {
+            '_default': ((u'/doc', ),
+                         ['en']
+                         ),
         }
 
     def code2encodings(self, code):
         """
-        Return a list of historical encodings for a specific language wikipedia
+        Return a list of historical encodings for a specific language.
+
+        @param code: site code
         """
         # Historic compatibility
         if code == 'pl':
@@ -91,6 +87,3 @@ class Family(family.WikimediaFamily):
         if code == 'ru':
             return 'utf-8', 'iso8859-5'
         return self.code2encoding(code),
-
-    def shared_data_repository(self, code, transcluded=False):
-        return ('wikidata', 'wikidata')

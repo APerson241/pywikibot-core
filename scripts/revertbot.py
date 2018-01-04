@@ -1,11 +1,9 @@
 #!/usr/bin/python
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
 """
 This script can be used for reverting certain edits.
 
 The following command line parameters are supported:
-
-&params;
 
 -username         Edits of which user need to be reverted.
 
@@ -14,24 +12,20 @@ The following command line parameters are supported:
 """
 #
 # (C) Bryan Tong Minh, 2008
-# (C) Pywikibot team, 2008-2014
+# (C) Pywikibot team, 2008-2017
 #
 # Ported by Geoffrey "GEOFBOT" Mon - User:Sn1per
 # for Google Code-In 2013
 #
 # Distributed under the terms of the MIT license.
 #
-__version__ = '$Id$'
-#
+from __future__ import absolute_import, unicode_literals
 
 import re
+
 import pywikibot
 from pywikibot import i18n
-from pywikibot import pagegenerators
-
-docuReplacements = {
-    '&params;': pagegenerators.parameterHelp
-}
+from pywikibot.tools.formatter import color_format
 
 
 class BaseRevertBot(object):
@@ -43,6 +37,7 @@ class BaseRevertBot(object):
     """
 
     def __init__(self, site, user=None, comment=None, rollback=False):
+        """Constructor."""
         self.site = site
         self.comment = comment
         self.user = user
@@ -51,91 +46,109 @@ class BaseRevertBot(object):
         self.rollback = rollback
 
     def get_contributions(self, max=500, ns=None):
-        count = 0
-        iterator = iter(xrange(0))
-        never_continue = False
-        while count != max or never_continue:
-            try:
-                item = iterator.next()
-            except StopIteration:
-                self.log(u'Fetching new batch of contributions')
-                data = list(pywikibot.Site().usercontribs(user=self.user, namespaces=ns, total=max))
-                never_continue = True
-                iterator = iter(data)
-            else:
-                count += 1
-                yield item
+        """Get contributions."""
+        return self.site.usercontribs(user=self.user, namespaces=ns, total=max)
 
     def revert_contribs(self, callback=None):
-
+        """Revert contributions."""
         if callback is None:
             callback = self.callback
 
-        contribs = self.get_contributions()
-        for item in contribs:
-            try:
-                if callback(item):
-                    result = self.revert(item)
-                    if result:
-                        self.log(u'%s: %s' % (item['title'], result))
-                    else:
-                        self.log(u'Skipped %s' % item['title'])
+        for item in self.get_contributions():
+            if callback(item):
+                result = self.revert(item)
+                if result:
+                    self.log(u'%s: %s' % (item['title'], result))
                 else:
-                    self.log(u'Skipped %s by callback' % item['title'])
-            except StopIteration:
-                return
+                    self.log(u'Skipped %s' % item['title'])
+            else:
+                self.log(u'Skipped %s by callback' % item['title'])
 
     def callback(self, item):
+        """Callback function."""
         return 'top' in item
 
     def revert(self, item):
-        history = pywikibot.Page(self.site, item['title']).fullVersionHistory(
-            total=2, rollback=self.rollback)
+        """Revert a single item."""
+        page = pywikibot.Page(self.site, item['title'])
+        history = list(page.revisions(total=2))
         if len(history) > 1:
             rev = history[1]
         else:
             return False
-        comment = i18n.twtranslate(pywikibot.Site(), 'revertbot-revert', {'revid': rev[0], 'author': rev[2], 'timestamp': rev[1]})
+        comment = i18n.twtranslate(
+            self.site, 'revertbot-revert',
+            {'revid': rev.revid,
+             'author': rev.user,
+             'timestamp': rev.timestamp})
         if self.comment:
             comment += ': ' + self.comment
-        page = pywikibot.Page(self.site, item['title'])
-        pywikibot.output(u"\n\n>>> \03{lightpurple}%s\03{default} <<<"
-                         % page.title(asLink=True, forceInterwiki=True,
-                                      textlink=True))
+        pywikibot.output(color_format(
+            '\n\n>>> {lightpurple}{0}{default} <<<',
+            page.title(asLink=True, forceInterwiki=True, textlink=True)))
         if not self.rollback:
             old = page.text
-            page.text = rev[3]
+            page.text = page.getOldVersion(rev.revid)
             pywikibot.showDiff(old, page.text)
             page.save(comment)
             return comment
         try:
-            pywikibot.data.api.Request(action="rollback", title=page.title(), user=self.user,
-                                           token=rev[4], markbot=1).submit()
+            pywikibot.data.api.Request(
+                self.site, parameters={'action': 'rollback',
+                                       'title': page,
+                                       'user': self.user,
+                                       'token': rev.rollbacktoken,
+                                       'markbot': True}).submit()
         except pywikibot.data.api.APIError as e:
-            if e == "badtoken: Invalid token":
-                pywikibot.out("There is an issue for rollbacking the edit, Giving up")
-                return False
-        return u"The edit(s) made in %s by %s was rollbacked" % (page.title(), self.user)
+            if e.code == 'badtoken':
+                pywikibot.error(
+                    'There was an API token error rollbacking the edit')
+            else:
+                pywikibot.exception()
+            return False
+        return 'The edit(s) made in %s by %s was rollbacked' % (page.title(),
+                                                                self.user)
 
     def log(self, msg):
+        """Log the message msg."""
         pywikibot.output(msg)
 
 
-class myRevertBot(BaseRevertBot):
+class RevertBot(BaseRevertBot):
+
+    """Example revert bot."""
 
     def callback(self, item):
+        """Callback function for 'private' revert bot.
+
+        @param item: an item from user contributions
+        @type item: dict
+        @rtype: bool
+
+        """
         if 'top' in item:
             page = pywikibot.Page(self.site, item['title'])
             text = page.get(get_redirect=True)
-            pattern = re.compile(u'\[\[.+?:.+?\..+?\]\]', re.UNICODE)
-            return pattern.search(text) >= 0
+            pattern = re.compile(r'\[\[.+?:.+?\..+?\]\]', re.UNICODE)
+            return bool(pattern.search(text))
         return False
 
 
-def main():
+myRevertBot = RevertBot  # for compatibility only
+
+
+def main(*args):
+    """
+    Process command line arguments and invoke bot.
+
+    If args is an empty list, sys.argv is used.
+
+    @param args: command line arguments
+    @type args: list of unicode
+    """
     user = None
     rollback = False
-    for arg in pywikibot.handleArgs():
+    for arg in pywikibot.handle_args(args):
         if arg.startswith('-username'):
             if len(arg) == 9:
                 user = pywikibot.input(
@@ -146,6 +159,7 @@ def main():
             rollback = True
     bot = myRevertBot(site=pywikibot.Site(), user=user, rollback=rollback)
     bot.revert_contribs()
+
 
 if __name__ == "__main__":
     main()

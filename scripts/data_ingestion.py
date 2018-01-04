@@ -1,84 +1,126 @@
 #!/usr/bin/python
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
 """
-A generic bot to do data ingestion (batch uploading) to Commons
+A generic bot to do data ingestion (batch uploading).
+
+usage:
+
+    python pwb.py data_ingestion -csvdir:local_dir/ -page:config_page
 """
 #
-# (C) Pywikibot team, 2013
+# (C) Pywikibot team, 2013-2017
 #
 # Distributed under the terms of the MIT license.
 #
-__version__ = '$Id$'
-#
+from __future__ import absolute_import, unicode_literals
+
+import base64
+import codecs
+import hashlib
+import io
+import os
+import sys
 
 import posixpath
-import urlparse
-import urllib
-import hashlib
-import base64
-import StringIO
+
+if sys.version_info[0] > 2:
+    import csv
+else:
+    import unicodecsv as csv
+
+from warnings import warn
 
 import pywikibot
-import upload
+
+from pywikibot import pagegenerators
+
+from pywikibot.comms.http import fetch
+from pywikibot.specialbots import UploadRobot
+from pywikibot.tools import deprecated, deprecated_args
+
+if sys.version_info[0] > 2:
+    from urllib.parse import urlparse
+else:
+    from urlparse import urlparse
 
 
-class Photo(object):
-    """
-    Represents a Photo (or other file), with metadata, to upload to Commons.
+class Photo(pywikibot.FilePage):
 
-    The constructor takes two parameters: URL (string) and metadata (dict with
-    str:str key:value pairs) that can be referred to from the title & template
-    generation.
+    """Represents a Photo (or other file), with metadata, to be uploaded."""
 
+    def __init__(self, URL, metadata, site=None):
+        """
+        Constructor.
 
-    """
+        @param URL: URL of photo
+        @type URL: str
+        @param metadata: metadata about the photo that can be referred to
+            from the title & template
+        @type metadata: dict
+        @param site: target site
+        @type site: APISite
 
-    def __init__(self, URL, metadata):
+        """
         self.URL = URL
         self.metadata = metadata
         self.metadata["_url"] = URL
         self.metadata["_filename"] = filename = posixpath.split(
-            urlparse.urlparse(URL)[2])[1]
+            urlparse(URL)[2])[1]
         self.metadata["_ext"] = ext = filename.split(".")[-1]
         if ext == filename:
             self.metadata["_ext"] = ext = None
         self.contents = None
 
+        if not site:
+            site = pywikibot.Site('commons', 'commons')
+
+        # default title
+        super(Photo, self).__init__(site,
+                                    self.getTitle('%(_filename)s.%(_ext)s'))
+
     def downloadPhoto(self):
         """
-        Download the photo and store it in a StringIO.StringIO object.
+        Download the photo and store it in a io.BytesIO object.
 
         TODO: Add exception handling
         """
         if not self.contents:
-            imageFile = urllib.urlopen(self.URL).read()
-            self.contents = StringIO.StringIO(imageFile)
+            imageFile = fetch(self.URL).raw
+            self.contents = io.BytesIO(imageFile)
         return self.contents
 
-    def findDuplicateImages(self,
-                            site=pywikibot.Site(u'commons', u'commons')):
+    @deprecated_args(site=None)
+    def findDuplicateImages(self):
         """
-        Takes the photo, calculates the SHA1 hash and asks the MediaWiki api
+        Find duplicates of the photo.
+
+        Calculates the SHA1 hash and asks the MediaWiki api
         for a list of duplicates.
 
         TODO: Add exception handling, fix site thing
         """
         hashObject = hashlib.sha1()
         hashObject.update(self.downloadPhoto().getvalue())
-        return site.getFilesFromAnHash(base64.b16encode(hashObject.digest()))
+        return [page.title(withNamespace=False) for page in
+                self.site.allimages(sha1=base64.b16encode(hashObject.digest()))]
 
     def getTitle(self, fmt):
         """
-        Given a format string with %(name)s entries, returns the string
-        formatted with metadata
+        Populate format string with %(name)s entries using metadata.
+
+        Note: this does not clean the title, so it may be unusable as
+        a MediaWiki page title, and cause an API exception when used.
+
+        @param fmt: format string
+        @type fmt: unicode
+        @return: formatted string
+        @rtype: unicode
         """
+        # FIXME: normalise the title so it is usable as a MediaWiki title.
         return fmt % self.metadata
 
     def getDescription(self, template, extraparams={}):
-        """
-        Generate a description for a file
-        """
-
+        """Generate a description for a file."""
         params = {}
         params.update(self.metadata)
         params.update(extraparams)
@@ -93,27 +135,63 @@ class Photo(object):
         return description
 
     def _safeTemplateValue(self, value):
+        """Replace pipe (|) with {{!}}."""
         return value.replace("|", "{{!}}")
 
 
-def CSVReader(fileobj, urlcolumn, *args, **kwargs):
-    import csv
+def CSVReader(fileobj, urlcolumn, site=None, *args, **kwargs):
+    """Yield Photo objects for each row of a CSV file."""
     reader = csv.DictReader(fileobj, *args, **kwargs)
-
     for line in reader:
-        yield Photo(line[urlcolumn], line)
+        yield Photo(line[urlcolumn], line, site=site)
 
 
-class DataIngestionBot:
+class DataIngestionBot(pywikibot.Bot):
+
+    """Data ingestion bot."""
+
     def __init__(self, reader, titlefmt, pagefmt,
-                 site=pywikibot.Site(u'commons', u'commons')):
-        self.reader = reader
+                 site='deprecated_default_commons'):
+        """
+        Constructor.
+
+        @param reader: Generator of Photos to process.
+        @type reader: Photo page generator
+        @param titlefmt: Title format
+        @type titlefmt: basestring
+        @param pagefmt: Page format
+        @type pagefmt: basestring
+        @param site: Target site for image upload.
+            Use None to determine the site from the pages treated.
+            Defaults to 'deprecated_default_commons' to use Wikimedia Commons
+            for backwards compatibility reasons. Deprecated.
+        @type site: APISite, 'deprecated_default_commons' or None
+        """
+        if site == 'deprecated_default_commons':
+            warn('site=\'deprecated_default_commons\' is deprecated; '
+                 'please specify a site or use site=None',
+                 DeprecationWarning, 2)
+            site = pywikibot.Site('commons', 'commons')
+        super(DataIngestionBot, self).__init__(generator=reader, site=site)
+
         self.titlefmt = titlefmt
         self.pagefmt = pagefmt
-        self.site = site
 
-    def _doUpload(self, photo):
-        duplicates = photo.findDuplicateImages(self.site)
+    @property
+    @deprecated('generator')
+    def reader(self):
+        """Get generator. Deprecated."""
+        return self.generator
+
+    @reader.setter
+    @deprecated('generator')
+    def reader(self, value):
+        """Set generator. Deprecated."""
+        self.generator = value
+
+    def treat(self, photo):
+        """Process each page."""
+        duplicates = photo.findDuplicateImages()
         if duplicates:
             pywikibot.output(u"Skipping duplicate of %r" % duplicates)
             return duplicates[0]
@@ -121,190 +199,113 @@ class DataIngestionBot:
         title = photo.getTitle(self.titlefmt)
         description = photo.getDescription(self.pagefmt)
 
-        bot = upload.UploadRobot(url=photo.URL,
-                                 description=description,
-                                 useFilename=title,
-                                 keepFilename=True,
-                                 verifyDescription=False,
-                                 targetSite=self.site)
+        bot = UploadRobot(url=photo.URL,
+                          description=description,
+                          useFilename=title,
+                          keepFilename=True,
+                          verifyDescription=False,
+                          targetSite=self.site)
         bot._contents = photo.downloadPhoto().getvalue()
         bot._retrieved = True
         bot.run()
 
         return title
 
+    @deprecated("treat()")
     def doSingle(self):
-        return self._doUpload(next(self.reader))
+        """Process one page."""
+        return self.treat(next(self.reader))
 
-    def run(self):
-        for photo in self.reader:
-            self._doUpload(photo)
-
-if __name__ == "__main__":
-    reader = CSVReader(open('tests/data/csv_ingestion.csv'), 'url')
-    bot = DataIngestionBot(
-        reader,
-        "%(name)s - %(set)s.%(_ext)s", ":user:valhallasw/test_template",
-        pywikibot.Site('test', 'test'))
-    bot.run()
-
-'''
-class DataIngestionBot:
-    def __init__(self, configurationPage):
+    @classmethod
+    def parseConfigurationPage(cls, configurationPage):
         """
+        Parse a Page which contains the configuration.
 
+        @param configurationPage: page with configuration
+        @type configurationPage: L{pywikibot.Page}
         """
-        self.site = configurationPage.site()
-        self.configuration = self.parseConfigurationPage(configurationPage)
-
-    def parseConfigurationPage(self, configurationPage):
-        """
-        Expects a pywikibot.page object "configurationPage" which contains the configuration
-        """
-        configuration  = {}
+        configuration = {}
         # Set a bunch of defaults
-        configuration['csvDialect']=u'excel'
-        configuration['csvDelimiter']=';'
-        configuration['csvEncoding']=u'Windows-1252' #FIXME: Encoding hell
+        configuration['csvDialect'] = u'excel'
+        configuration['csvDelimiter'] = ';'
+        configuration['csvEncoding'] = u'Windows-1252'  # FIXME: Encoding hell
 
         templates = configurationPage.templatesWithParams()
         for (template, params) in templates:
-            if template == u'Data ingestion':
+            if template.title(withNamespace=False) == u'Data ingestion':
                 for param in params:
                     (field, sep, value) = param.partition(u'=')
 
                     # Remove leading or trailing spaces
                     field = field.strip()
                     value = value.strip()
+                    if not value:
+                        value = None
                     configuration[field] = value
-        print configuration
+
         return configuration
 
 
-    def downloadPhoto(self, photoUrl=''):
-        """
-        Download the photo and store it in a StrinIO.StringIO object.
+def main(*args):
+    """
+    Process command line arguments and invoke bot.
 
-        TODO: Add exception handling
-        """
-        imageFile = urllib.urlopen(photoUrl).read()
-        return StringIO.StringIO(imageFile)
+    If args is an empty list, sys.argv is used.
 
-    def findDuplicateImages(self, photo=None, site=pywikibot.Site(u'commons', u'commons')):
-        """
-        Takes the photo, calculates the SHA1 hash and asks the MediaWiki api for a list of duplicates.
-
-        TODO: Add exception handling, fix site thing
-        """
-        hashObject = hashlib.sha1()
-        hashObject.update(photo.getvalue())
-        return site.getFilesFromAnHash(base64.b16encode(hashObject.digest()))
-
-    def getTitle(self, metadata):
-        """
-        Build a title.
-        Have titleFormat to indicate how the title would look.
-        We need to be able to strip off stuff if it's too long. configuration.get('maxTitleLength')
-        """
-
-        #FIXME: Make this configurable.
-        title = self.configuration.get('titleFormat') % metadata
-
-        description = metadata.get(u'dc:title')
-        identifier = metadata.get(u'dc:identifier')
-
-        if len(description) > 120:
-            description = description[0 : 120]
-
-        title = u'%s - %s.jpg' % (description, identifier)
-
-        return flickrripper.cleanUpTitle(title)
-
-    def cleanDate(self, field):
-        """
-        A function to do date clean up.
-        """
-        # Empty, make it really empty
-        if field == u'-':
-            return u''
-        # TODO: Circa
-        # TODO: Period
-
-        return field
-
-    def cleanEmptyField(self, field):
-        return field
-
-    def procesFile(self, metadata):
-        # FIXME: Do some metadata enrichment
-        #metadata = getEuropeanaMetadata(metadata)
-
-        fileLocation = metadata.get(self.configuration.get('sourceFileField'))
-
-        photo = self.downloadPhoto(fileLocation)
-        duplicates = self.findDuplicateImages(photo)
-
-        # We don't want to upload dupes
-        if duplicates:
-            pywikibot.output(u'Found duplicate image at %s' % duplicates.pop())
-            # The file is at Commons so return True
-            return True
-
-        # FIXME: Do some checking to see if the title already exists
-
-        title = self.getTitle(metadata)
-        description = self.getDescription(metadata)
-
-
-        pywikibot.output(u'Preparing upload for %s.' % title)
-        pywikibot.output(description)
-
-        bot = upload.UploadRobot(url=fileLocation, description=description, useFilename=title, keepFilename=True, verifyDescription=False, targetSite = self.site)
-        bot.run()
-
-    def processCSV(self):
-        database = {}
-
-        reader = csv.DictReader(open(self.configuration.get('csvFile'), "rb"), dialect=self.configuration.get('csvDialect'), delimiter=self.configuration.csvDelimiter)
-        # FIXME : Encoding problems https://docs.python.org/2/library/csv.html#csv-examples
-        for row in reader:
-            self.metadataCSV(row)
-            self.processFile(metadata)
-
-    def run(self):
-        """
-        Do crap
-        """
-        if not self.configuration.get('sourceFormat'):
-            pywikibot.output(u'The field "sourceFormat" is not set')
-            return False
-
-        if self.configuration.get('sourceFormat') == u'csv':
-            self.processCSV()
-        else:
-            pywikibot.output(u'%s is not a supported source format')
-
-def main():
-    generator = None;
-
+    @param args: command line arguments
+    @type args: list of unicode
+    """
     # Process global args and prepare generator args parser
-    local_args = pywikibot.handleArgs()
+    local_args = pywikibot.handle_args(args)
     genFactory = pagegenerators.GeneratorFactory()
+    csv_dir = None
 
     for arg in local_args:
-        genFactory.handleArg(arg)
+        if arg.startswith('-csvdir:'):
+            csv_dir = arg[8:]
+        else:
+            genFactory.handleArg(arg)
 
-    generator = genFactory.getCombinedGenerator()
-    if not generator:
+    config_generator = genFactory.getCombinedGenerator()
+
+    if not config_generator or not csv_dir:
+        pywikibot.bot.suggest_help(
+            missing_parameters=[] if csv_dir else ['-csvdir'],
+            missing_generator=not config_generator)
         return False
 
-    for page in generator:
-        bot  = DataIngestionBot(page)
-        bot.run()
+    for config_page in config_generator:
+        try:
+            config_page.get()
+        except pywikibot.NoPage:
+            pywikibot.error('%s does not exist' % config_page)
+            continue
+
+        configuration = DataIngestionBot.parseConfigurationPage(config_page)
+
+        filename = os.path.join(csv_dir, configuration['csvFile'])
+        try:
+
+            f = codecs.open(filename, 'r', configuration['csvEncoding'])
+        except (IOError, OSError) as e:
+            pywikibot.error('%s could not be opened: %s' % (filename, e))
+            continue
+
+        try:
+            files = CSVReader(f, urlcolumn='url',
+                              site=config_page.site,
+                              dialect=configuration['csvDialect'],
+                              delimiter=str(configuration['csvDelimiter']))
+
+            bot = DataIngestionBot(files,
+                                   configuration['titleFormat'],
+                                   configuration['formattingTemplate'],
+                                   site=None)
+
+            bot.run()
+        finally:
+            f.close()
+
 
 if __name__ == "__main__":
-    try:
-        main()
-    finally:
-        print "All done!"
-'''
+    main()

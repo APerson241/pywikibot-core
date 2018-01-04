@@ -1,4 +1,12 @@
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
+"""Family module for LyricWiki."""
+#
+# (C) Pywikibot team, 2007-2015
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
+
 __version__ = '$Id$'
 
 from pywikibot import family
@@ -8,19 +16,10 @@ from pywikibot import family
 
 # user_config.py:
 # usernames['lyricwiki']['en'] = 'user'
-class Family(family.Family):
-    def __init__(self):
-        family.Family.__init__(self)
-        self.name = 'lyricwiki'
-        self.langs = {
-            'en': 'lyrics.wikia.com',
-        }
+class Family(family.SingleSiteFamily, family.WikiaFamily):
 
-    def version(self, code):
-        return "1.16.2"
+    """Family class for LyricWiki."""
 
-    def scriptpath(self, code):
-        return ''
-
-    def apipath(self, code):
-        return '/api.php'
+    name = 'lyricwiki'
+    code = 'en'
+    domain = 'lyrics.wikia.com'

@@ -1,49 +1,58 @@
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
+"""Family module for Wikinews."""
+#
+# (C) Pywikibot team, 2005-2017
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
+
 from pywikibot import family
 
 __version__ = '$Id$'
 
 
 # The Wikimedia family that is known as Wikinews
-class Family(family.WikimediaFamily):
-    def __init__(self):
-        super(Family, self).__init__()
-        self.name = 'wikinews'
+class Family(family.SubdomainFamily, family.WikimediaFamily):
 
+    """Family class for Wikinews."""
+
+    name = 'wikinews'
+
+    closed_wikis = [
+        # https://noc.wikimedia.org/conf/highlight.php?file=closed.dblist
+        'hu', 'sd', 'th',
+    ]
+
+    def __init__(self):
+        """Constructor."""
         self.languages_by_size = [
-            'sr', 'en', 'fr', 'pl', 'de', 'it', 'es', 'pt', 'ru', 'ca', 'zh',
-            'sv', 'ja', 'ta', 'el', 'cs', 'ar', 'uk', 'fa', 'fi', 'ro', 'tr',
-            'he', 'bg', 'sq', 'no', 'ko', 'eo', 'bs',
+            'sr', 'en', 'fr', 'ru', 'de', 'pt', 'pl', 'es', 'it', 'zh', 'cs',
+            'ar', 'ca', 'el', 'ta', 'nl', 'sv', 'fa', 'uk', 'ro', 'tr', 'ja',
+            'sq', 'no', 'eo', 'fi', 'bs', 'he', 'ko', 'bg',
         ]
 
-        self.langs = dict([(lang, '%s.wikinews.org' % lang)
-                           for lang in self.languages_by_size])
+        super(Family, self).__init__()
 
-        # Global bot allowed languages on https://meta.wikimedia.org/wiki/Bot_policy/Implementation#Current_implementation
-        self.cross_allowed = ['ca', 'cs', 'en', 'fa', 'ko', ]
-
-        # Which languages have a special order for putting interlanguage links,
-        # and what order is it? If a language is not in interwiki_putfirst,
-        # alphabetical order on language code is used. For languages that are in
-        # interwiki_putfirst, interwiki_putfirst is checked first, and
-        # languages are put in the order given there. All other languages are
-        # put after those, in code-alphabetical order.
-        self.interwiki_putfirst = {
-            'en': self.alphabetic,
-            'fi': self.alphabetic,
-            'fr': self.alphabetic,
-            'he': ['en'],
-            'hu': ['en'],
-            'pl': self.alphabetic,
+        self.category_redirect_templates = {
+            '_default': (),
+            'ar': ('قالب:تحويل تصنيف',),
+            'fa': ('الگو:رده بهتر',),
+            'no': ('Kategoriomdirigering',),
+            'ro': ('Redirect categorie',),
+            'ru': ('Category redirect',),
+            'tr': ('Kategori yönlendirme',),
+            'zh': ('分类重定向',),
         }
 
-        self.obsolete = {
-            'hu': None,  # https://bugzilla.wikimedia.org/show_bug.cgi?id=28342
-            'jp': 'ja',
-            'nb': 'no',
-            'nl': None,  # https://bugzilla.wikimedia.org/show_bug.cgi?id=20325
-            'sd': None,
-            'th': None,  # https://bugzilla.wikimedia.org/show_bug.cgi?id=28341
-            'zh-tw': 'zh',
-            'zh-cn': 'zh'
-        }
+        # Global bot allowed languages on
+        # https://meta.wikimedia.org/wiki/BPI#Current_implementation
+        # & https://meta.wikimedia.org/wiki/Special:WikiSets/2
+        self.cross_allowed = [
+            'ar', 'bg', 'bs', 'ca', 'cs', 'el', 'en', 'eo', 'fa', 'fi', 'he',
+            'ja', 'ko', 'nl', 'no', 'pt', 'ro', 'sq', 'sr', 'sv', 'ta', 'tr',
+            'uk', 'zh',
+        ]
+
+        # TODO:
+        # Change site_tests.py when wikinews will have doc_subpage.

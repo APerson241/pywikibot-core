@@ -1,49 +1,29 @@
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
+"""Family module for Vikidia."""
+#
+# (C) Pywikibot team, 2010-2016
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
 
 __version__ = '$Id$'
 
 from pywikibot import family
 
 
-class Family(family.Family):
-    def __init__(self):
-        family.Family.__init__(self)
-        self.name = 'vikidia'
+class Family(family.SubdomainFamily):
 
-        self.langs = {
-            'en': 'en.vikidia.org',
-            'es': 'es.vikidia.org',
-            'fr': 'fr.vikidia.org',
-            'it': 'it.vikidia.org',
-            'ru': 'ru.vikidia.org',
-        }
+    """Family class for Vikidia."""
 
-        # Wikimedia wikis all use "bodyContent" as the id of the <div>
-        # element that contains the actual page content; change this for
-        # wikis that use something else (e.g., mozilla family)
-        self.content_id = "bodyContent"
+    name = 'vikidia'
+    domain = 'vikidia.org'
 
-    def scriptpath(self, code):
-        """The prefix used to locate scripts on this wiki.
+    codes = ['ca', 'de', 'en', 'es', 'eu', 'fr', 'it', 'ru', 'scn']
 
-        This is the value displayed when you enter {{SCRIPTPATH}} on a
-        wiki page (often displayed at [[Help:Variables]] if the wiki has
-        copied the master help page correctly).
+    # Sites we want to edit but not count as real languages
+    test_codes = ['central', 'test']
 
-        The default value is the one used on Wikimedia Foundation wikis,
-        but needs to be overridden in the family file for any wiki that
-        uses a different value.
-
-        """
-        return '/w'
-
-    # Which version of MediaWiki is used? REQUIRED
-    def version(self, code):
-        # Replace with the actual version being run on your wiki
-        return '1.23.1'
-
-    def code2encoding(self, code):
-        """Return the encoding for a specific language wiki"""
-        # Most wikis nowadays use UTF-8, but change this if yours uses
-        # a different encoding
-        return 'utf-8'
+    def protocol(self, code):
+        """Return https as the protocol for this family."""
+        return "https"

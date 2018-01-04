@@ -1,8 +1,20 @@
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 """
-Add or change categories on a number of pages. Usage: catall.py name - goes
-through pages, starting at 'name'. Provides the categories on the page and asks
-whether to change them. If no starting name is provided, the bot starts at 'A'.
+This script shows the categories on each page and lets you change them.
+
+For each page in the target wiki:
+
+- If the page contains no categories, you can specify a list of categories to
+  add to the page.
+- If the page already contains one or more categories, you can specify a new
+  list of categories to replace the current list of categories of the page.
+
+Usage:
+
+    python pwb.py catall [start]
+
+If no starting name is provided, the bot starts at 'A'.
 
 Options:
 -onlynew : Only run on pages that do not yet have a category.
@@ -13,19 +25,20 @@ Options:
 #
 # Distributed under the terms of the MIT license.
 #
-__version__ = '$Id$'
-#
+from __future__ import absolute_import, unicode_literals
 
-import sys
 import pywikibot
-from pywikibot import i18n
+from pywikibot import i18n, textlib
+from pywikibot.bot import QuitKeyboardInterrupt
 
 
 def choosecats(pagetext):
+    """Coose categories."""
     chosen = []
     done = False
     length = 1000
-    print("""Give the new categories, one per line.
+    # TODO: → input_choice
+    pywikibot.output("""Give the new categories, one per line.
 Empty line: if the first, don't change. Otherwise: Ready.
 -: I made a mistake, let me start over.
 ?: Give the text of the page with GUI.
@@ -50,38 +63,44 @@ q: quit.""")
             chosen = None
             done = True
         elif choice == "q":
-            print "quit..."
-            sys.exit()
+            raise QuitKeyboardInterrupt
         else:
             chosen.append(choice)
     return chosen
 
 
 def make_categories(page, list, site=None):
+    """Make categories."""
     if site is None:
         site = pywikibot.Site()
     pllist = []
     for p in list:
-        cattitle = "%s:%s" % (site.category_namespace(), p)
+        cattitle = "%s:%s" % (site.namespaces.CATEGORY, p)
         pllist.append(pywikibot.Page(site, cattitle))
-    page.put_async(pywikibot.replaceCategoryLinks(page.get(), pllist),
-                   comment=i18n.twtranslate(site.code, 'catall-changing'))
+    page.put_async(textlib.replaceCategoryLinks(page.get(), pllist,
+                                                site=page.site),
+                   summary=i18n.twtranslate(site, 'catall-changing'))
 
 
-def main():
+def main(*args):
+    """
+    Process command line arguments and perform task.
+
+    If args is an empty list, sys.argv is used.
+
+    @param args: command line arguments
+    @type args: list of unicode
+    """
     docorrections = True
-    start = []
+    start = 'A'
 
-    for arg in pywikibot.handleArgs():
+    local_args = pywikibot.handle_args(args)
+
+    for arg in local_args:
         if arg == '-onlynew':
             docorrections = False
         else:
-            start.append(arg)
-
-    if not start:
-        start = 'A'
-    else:
-        start = ' '.join(start)
+            start = arg
 
     mysite = pywikibot.Site()
 
@@ -91,8 +110,8 @@ def main():
             cats = p.categories()
             if not cats:
                 pywikibot.output(u"========== %s ==========" % p.title())
-                print "No categories"
-                print "-" * 40
+                pywikibot.output('No categories')
+                pywikibot.output('-' * 40)
                 newcats = choosecats(text)
                 if newcats != [] and newcats is not None:
                     make_categories(p, newcats, mysite)
@@ -100,7 +119,7 @@ def main():
                 pywikibot.output(u"========== %s ==========" % p.title())
                 for c in cats:
                     pywikibot.output(c.title())
-                print "-" * 40
+                pywikibot.output('-' * 40)
                 newcats = choosecats(text)
                 if newcats is None:
                     make_categories(p, [], mysite)
@@ -109,5 +128,9 @@ def main():
         except pywikibot.IsRedirectPage:
             pywikibot.output(u'%s is a redirect' % p.title())
 
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pywikibot.output('\nQuitting program...')

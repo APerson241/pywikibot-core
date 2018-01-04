@@ -1,22 +1,27 @@
+#!/usr/bin/python
 # -*- coding: UTF-8 -*-
 """
-This bot takes as its argument (or, if no argument is given, asks for it), the
-name of a new or existing category. It will then try to find new articles for
-this category (pages linked to and from pages already in the category), asking
-the user which pages to include and which not.
+This bot takes as its argument the name of a new or existing category.
 
-Arguments:
-   -nodates  automatically skip all pages that are years or dates (years
-             only work AD, dates only for certain languages)
-   -forward  only check pages linked from pages already in the category,
-             not pages linking to them. Is less precise but quite a bit
-             faster.
-   -exist    only ask about pages that do actually exist; drop any
-             titles of non-existing pages silently. If -forward is chosen,
-             -exist is automatically implied.
-   -keepparent  do not remove parent categories of the category to be
-             worked on.
-   -all      work on all pages (default: only main namespace)
+It will then try to find new articles for this category
+(pages linked to and from pages already in the category),
+asking the user which pages to include and which not.
+
+The following command line parameters are supported:
+
+-nodates    Automatically skip all pages that are years or dates
+            (years only work AD, dates only for certain languages).
+
+-forward    Only check pages linked from pages already in the category,
+            not pages linking to them. Is less precise but quite a bit faster.
+
+-exist      Only ask about pages that do actually exist;
+            drop any titles of non-existing pages silently.
+            If -forward is chosen, -exist is automatically implied.
+
+-keepparent Do not remove parent categories of the category to be worked on.
+
+-all        Work on all pages (default: only main namespace)
 
 When running the bot, you will get one by one a number by pages. You can
 choose:
@@ -24,36 +29,28 @@ Y(es) - include the page
 N(o) - do not include the page or
 I(gnore) - do not include the page, but if you meet it again, ask again.
 X - add the page, but do not check links to and from it
+
 Other possiblities:
 A(dd) - add another page, which may have been one that was included before
 C(heck) - check links to and from the page, but do not add the page itself
 R(emove) - remove a page that is already in the list
 L(ist) - show current list of pages to include or to check
 """
-
 # (C) Andre Engels, 2004
-# (C) Pywikibot team 2005-2014
+# (C) Pywikibot team, 2005-2017
 #
 # Distributed under the terms of the MIT license.
 #
-__version__ = '$Id$'
-#
+from __future__ import absolute_import, unicode_literals
 
 import codecs
+import sys
+
 import pywikibot
-from pywikibot import date, pagegenerators, i18n
 
+from pywikibot import pagegenerators, i18n, textlib
 
-def rawtoclean(c):
-    #Given the 'raw' category, provides the 'clean' category
-    c2 = c.title().split('|')[0]
-    return pywikibot.Page(mysite, c2)
-
-
-def isdate(s):
-    """returns true if s is a date or year """
-    dict, val = date.getAutoFormat(pywikibot.Site().language(), s)
-    return dict is not None
+from pywikibot.tools import DequeGenerator
 
 
 def needcheck(pl):
@@ -63,12 +60,12 @@ def needcheck(pl):
     if pl in checked:
         return False
     if skipdates:
-        if isdate(pl.title()):
+        if pl.autoFormat()[0] is not None:
             return False
     return True
 
 
-def include(pl, checklinks=True, realinclude=True, linkterm=None):
+def include(pl, checklinks=True, realinclude=True, linkterm=None, summary=''):
     cl = checklinks
     if linkterm:
         actualworkingcat = pywikibot.Category(mysite, workingcat.title(),
@@ -82,7 +79,6 @@ def include(pl, checklinks=True, realinclude=True, linkterm=None):
             pass
         except pywikibot.IsRedirectPage:
             cl = True
-            pass
         else:
             cats = [x for x in pl.categories()]
             if workingcat not in cats:
@@ -90,11 +86,13 @@ def include(pl, checklinks=True, realinclude=True, linkterm=None):
                 for c in cats:
                     if c in parentcats:
                         if removeparent:
-                            pl.change_category(actualworkingcat)
+                            pl.change_category(actualworkingcat,
+                                               summary=summary)
                             break
                 else:
-                    pl.put(pywikibot.replaceCategoryLinks(
-                        text, cats + [actualworkingcat]))
+                    pl.put(textlib.replaceCategoryLinks(
+                        text, cats + [actualworkingcat], site=pl.site),
+                        summary=summary)
     if cl:
         if checkforward:
             for page2 in pl.linkedPages():
@@ -108,12 +106,7 @@ def include(pl, checklinks=True, realinclude=True, linkterm=None):
                     checked[refPage] = refPage
 
 
-def exclude(pl, real_exclude=True):
-    if real_exclude:
-        excludefile.write('%s\n' % pl.title())
-
-
-def asktoadd(pl):
+def asktoadd(pl, summary):
     if pl.site != mysite:
         return
     if pl.isRedirectPage():
@@ -126,9 +119,11 @@ def asktoadd(pl):
     pywikibot.output(u'')
     pywikibot.output(u"==%s==" % pl.title())
     while True:
-        answer = raw_input("y(es)/n(o)/i(gnore)/(o)ther options? ")
+        # TODO: Use pywikibot.inputChoice?
+        # (needs the support for 'other options')
+        answer = pywikibot.input("[y]es/[n]o/[i]gnore/[o]ther options?")
         if answer == 'y':
-            include(pl)
+            include(pl, summary=summary)
             break
         if answer == 'c':
             include(pl, realinclude=False)
@@ -138,15 +133,14 @@ def asktoadd(pl):
                 if not pl.isRedirectPage():
                     linkterm = pywikibot.input(
                         u"In what manner should it be alphabetized?")
-                    include(pl, linkterm=linkterm)
+                    include(pl, linkterm=linkterm, summary=summary)
                     break
-            include(pl)
+            include(pl, summary=summary)
             break
         elif answer == 'n':
-            exclude(pl)
+            excludefile.write('%s\n' % pl.title())
             break
         elif answer == 'i':
-            exclude(pl, real_exclude=False)
             break
         elif answer == 'o':
             pywikibot.output(u"t: Give the beginning of the text of the page")
@@ -158,10 +152,10 @@ def asktoadd(pl):
             pywikibot.output(u"a: Add another page")
             pywikibot.output(u"l: Give a list of the pages to check")
         elif answer == 'a':
-            pagetitle = raw_input("Specify page to add:")
+            pagetitle = pywikibot.input("Specify page to add:")
             page = pywikibot.Page(pywikibot.Site(), pagetitle)
             if page not in checked.keys():
-                include(page)
+                include(page, summary=summary)
         elif answer == 'x':
             if pl.exists():
                 if pl.isRedirectPage():
@@ -169,10 +163,9 @@ def asktoadd(pl):
                         u"Redirect page. Will be included normally.")
                     include(pl, realinclude=False)
                 else:
-                    include(pl, checklinks=False)
+                    include(pl, checklinks=False, summary=summary)
             else:
                 pywikibot.output(u"Page does not exist; not added.")
-                exclude(pl, real_exclude=False)
             break
         elif answer == 'l':
             pywikibot.output(u"Number of pages still to check: %s"
@@ -190,6 +183,7 @@ def asktoadd(pl):
         else:
             pywikibot.output(u"Not understood.")
 
+
 try:
     checked = {}
     skipdates = False
@@ -198,9 +192,9 @@ try:
     checkbroken = True
     removeparent = True
     main = True
-    workingcatname = []
-    tocheck = []
-    for arg in pywikibot.handleArgs():
+    workingcatname = ''
+    tocheck = DequeGenerator()
+    for arg in pywikibot.handle_args():
         if arg.startswith('-nodate'):
             skipdates = True
         elif arg.startswith('-forward'):
@@ -212,22 +206,24 @@ try:
             removeparent = False
         elif arg.startswith('-all'):
             main = False
-        else:
-            workingcatname.append(arg)
+        elif not workingcatname:
+            workingcatname = arg
 
-    if len(workingcatname) == 0:
-        workingcatname = raw_input("Which page to start with? ")
-    else:
-        workingcatname = ' '.join(workingcatname)
+    if not workingcatname:
+        pywikibot.bot.suggest_help(missing_parameters=['working category'])
+        sys.exit(0)
+
     mysite = pywikibot.Site()
-    workingcatname = unicode(workingcatname, 'utf-8')
-    pywikibot.setAction(i18n.twtranslate(mysite, 'makecat-create', {'cat': workingcatname}))
+    summary = i18n.twtranslate(mysite, 'makecat-create',
+                               {'cat': workingcatname})
     workingcat = pywikibot.Category(mysite,
                                     u'%s:%s'
-                                    % (mysite.category_namespace(),
+                                    % (mysite.namespaces.CATEGORY,
                                        workingcatname))
-    filename = pywikibot.config.datafilepath('category',
-                                             workingcatname.encode('ascii', 'xmlcharrefreplace') + '_exclude.txt')
+    filename = pywikibot.config.datafilepath(
+        'category',
+        workingcatname.encode('ascii', 'xmlcharrefreplace').decode('ascii') +
+        '_exclude.txt')
     try:
         f = codecs.open(filename, 'r', encoding=mysite.encoding())
         for line in f.readlines():
@@ -237,7 +233,6 @@ try:
                     line = line[:-1]
             except IndexError:
                 pass
-            exclude(line, real_exclude=False)
             pl = pywikibot.Page(mysite, line)
             checked[pl] = pl
         f.close()
@@ -245,10 +240,13 @@ try:
     except IOError:
         # File does not exist
         excludefile = codecs.open(filename, 'w', encoding=mysite.encoding())
+
+    # Get parent categories in order to `removeparent`
     try:
         parentcats = workingcat.categories()
     except pywikibot.Error:
         parentcats = []
+
     # Do not include articles already in subcats; only checking direct subcats
     subcatlist = list(workingcat.subcategories())
     if subcatlist:
@@ -256,16 +254,13 @@ try:
         for cat in subcatlist:
             artlist = list(cat.articles())
             for page in artlist:
-                exclude(page.title(), real_exclude=False)
                 checked[page] = page
-    list = [x for x in workingcat.articles()]
-    if list:
-        for pl in list:
-            checked[pl] = pl
-        list = pagegenerators.PreloadingGenerator(list)
-        for pl in list:
-            include(pl)
-    else:
+
+    # Fetch articles in category, and mark as already checked (seen)
+    # If category is empty, ask user if they want to look for pages
+    # in a diferent category.
+    articles = list(workingcat.articles(content=True))
+    if not articles:
         pywikibot.output(
             u"Category %s does not exist or is empty. Which page to start with?"
             % workingcatname)
@@ -274,29 +269,20 @@ try:
             answer = workingcatname
         pywikibot.output(u'' + answer)
         pl = pywikibot.Page(mysite, answer)
-        tocheck = []
+        articles = [pl]
+
+    for pl in articles:
         checked[pl] = pl
-        include(pl)
-    loaded = 0
-    while tocheck:
-        if loaded == 0:
-            if len(tocheck) < 50:
-                loaded = len(tocheck)
-            else:
-                loaded = 50
-            tocheck = [x for x in pagegenerators.PreloadingGenerator(tocheck[:loaded])]
-        if not checkbroken:
-            if not tocheck[0].exists():
-                pass
-            else:
-                asktoadd(tocheck[0])
-        else:
-            asktoadd(tocheck[0])
-        tocheck = tocheck[1:]
-        loaded -= 1
+        include(pl, summary=summary)
+
+    gen = pagegenerators.DequePreloadingGenerator(tocheck)
+
+    for page in gen:
+        if checkbroken or page.exists():
+            asktoadd(page, summary)
 
 finally:
     try:
         excludefile.close()
-    except:
+    except Exception:
         pass

@@ -2,24 +2,34 @@
 # -*- coding: utf-8 -*-
 """
 Program to add uncat template to images without categories at commons.
-See imagerecat.py (still working on that one) to add these images to categories.
 
+See imagerecat.py to add these images to categories.
+
+This script is working on the given site, so if the commons should be handled,
+the site commons should be given and not a Wikipedia or similar.
+
+&params;
 """
 #
-# (C) Multichill 2008
-# (C) Pywikibot team, 2009-2014
+# (C) Multichill, 2008
+# (C) Pywikibot team, 2009-2017
 #
 # Distributed under the terms of the MIT license.
 #
-__version__ = '$Id$'
-#
+from __future__ import absolute_import, unicode_literals
 
-from datetime import datetime
 from datetime import timedelta
-import pywikibot
-from pywikibot import pagegenerators
 
-#Probably unneeded because these are hidden categories. Have to figure it out.
+import pywikibot
+from pywikibot.exceptions import ArgumentDeprecationWarning
+from pywikibot import pagegenerators
+from pywikibot.tools import issue_deprecation_warning
+
+docuReplacements = {
+    '&params;': pagegenerators.parameterHelp,
+}
+
+# Probably unneeded because these are hidden categories. Have to figure it out.
 ignoreCategories = [u'[[Category:CC-BY-SA-3.0]]',
                     u'[[Category:GFDL]]',
                     u'[[Category:Media for cleanup]]',
@@ -28,7 +38,7 @@ ignoreCategories = [u'[[Category:CC-BY-SA-3.0]]',
                     u'[[Category:Media lacking a description]]',
                     u'[[Category:Self-published work]]']
 
-#Dont bother to put the template on a image with one of these templates
+# Dont bother to put the template on a image with one of these templates
 skipTemplates = [u'Delete',
                  u'Nocat',
                  u'No license',
@@ -38,7 +48,7 @@ skipTemplates = [u'Delete',
                  u'Uncategorized',
                  u'Uncat']
 
-#Ignore the templates in this really long list when looking for relevant categories
+# Ignore templates in this long list when looking for relevant categories
 ignoreTemplates = [u'1000Bit',
                    u'1922 cyc',
                    u'2MASS',
@@ -1230,50 +1240,32 @@ ignoreTemplates = [u'1000Bit',
                    u'Zxx',
                    ]
 
-puttext = u'\n{{Uncategorized|year={{subst:CURRENTYEAR}}|month={{subst:CURRENTMONTHNAME}}|day={{subst:CURRENTDAY}}}}'
+puttext = ('\n{{Uncategorized|year={{subst:CURRENTYEAR}}|'
+           'month={{subst:CURRENTMONTHNAME}}|day={{subst:CURRENTDAY}}}}')
 putcomment = u'Please add categories to this image'
 
 
 def uploadedYesterday(site):
-    '''
+    """
     Return a pagegenerator containing all the pictures uploaded yesterday.
-    Should probably copied to somewhere else
 
-    '''
-
+    DEPRECATED. Only used by a deprecated option.
+    """
     today = pywikibot.Timestamp.utcnow()
     yesterday = today + timedelta(days=-1)
 
     for logentry in site.logevents(logtype='upload', start=yesterday, end=today, reverse=True):
-        yield logentry.title()
-
-
-def recentChanges(site=None, delay=0, block=70):
-    '''
-    Return a pagegenerator containing all the images edited in a certain timespan.
-    The delay is the amount of minutes to wait and the block is the timespan to return images in.
-    Should probably be copied to somewhere else
-    '''
-    rcstart = site.getcurrenttime() + timedelta(minutes=-(delay + block))
-    rcend = site.getcurrenttime() + timedelta(minutes=-delay)
-
-    gen = site.recentchanges(start=rcstart, end=rcend, reverse=True,
-                             namespaces=6, changetype='edit|log',
-                             showBot=False)
-    # remove 'patrolled' from rcprop since we can't get it
-    gen.request['rcprop'] = 'title|user|comment|ids'
-    for p in gen:
-        yield pywikibot.Page(site, p['title'], p['ns'])
+        yield logentry.page()
 
 
 def isUncat(page):
-    '''
-    Do we want to skip this page?
+    """
+    Do we want to skip this page.
 
     If we found a category which is not in the ignore list it means
     that the page is categorized so skip the page.
     If we found a template which is in the ignore list, skip the page.
-    '''
+    """
     pywikibot.output(u'Working on ' + page.title())
 
     for category in page.categories():
@@ -1282,7 +1274,7 @@ def isUncat(page):
             return False
 
     for templateWithTrail in page.templates():
-        #Strip of trailing garbage
+        # Strip of trailing garbage
         template = templateWithTrail.title().rstrip('\n').rstrip()
         if template in skipTemplates:
             # Already tagged with a template, skip it
@@ -1298,9 +1290,12 @@ def isUncat(page):
 
 
 def addUncat(page):
-    '''
-    Add the uncat template to the page
-    '''
+    """
+    Add the uncat template to the page.
+
+    @param page: Page to be modified
+    @type page: pywikibot.Page
+    """
     newtext = page.get() + puttext
     pywikibot.showDiff(page.get(), newtext)
     try:
@@ -1315,39 +1310,73 @@ def addUncat(page):
 
 
 def main(*args):
-    '''
-    Grab a bunch of images and tag them if they are not categorized.
-    '''
+    """
+    Process command line arguments and invoke bot.
+
+    If args is an empty list, sys.argv is used.
+
+    @param args: command line arguments
+    @type args: list of unicode
+    """
     generator = None
 
-    local_args = pywikibot.handleArgs(*args)
+    local_args = pywikibot.handle_args(args)
 
-    # use the default imagerepository normally commons
-    site = pywikibot.Site().image_repository()
+    site = pywikibot.Site()
+
+    if site.code != 'commons' or site.family.name != 'commons':
+        pywikibot.warning('This script is primarily written for Wikimedia '
+                          'Commons, but has been invoked with site {0}. It '
+                          'might work for other sites but there is no '
+                          'guarantee that it does the right thing.'.format(site))
+        choice = pywikibot.input_choice(
+            'How do you want to continue?',
+            (('Continue using {0}'.format(site), 'c'),
+             ('Switch to Wikimedia Commons', 's'),
+             ('Quit', 'q')),
+            automatic_quit=False)
+        if choice == 's':
+            site = pywikibot.Site('commons', 'commons')
+        elif choice == 'q':
+            return False
 
     genFactory = pagegenerators.GeneratorFactory(site)
 
-    site.login()
     for arg in local_args:
+        param_arg, sep, param_value = arg.partition(':')
+        if param_value == '':
+            param_value = None
         if arg.startswith('-yesterday'):
             generator = uploadedYesterday(site)
+            issue_deprecation_warning(
+                'The usage of "-yesterday"',
+                '-logevents:"upload,,YYYYMMDD,YYYYMMDD"',
+                2, ArgumentDeprecationWarning)
         elif arg.startswith('-recentchanges'):
-            generator = recentChanges(site=site, delay=120)
+            if param_value is None:
+                arg = arg + ':120,70'
+                issue_deprecation_warning(
+                    '-recentchanges without parameters',
+                    '-recentchanges:offset,duration',
+                    2, ArgumentDeprecationWarning)
+            genFactory.handleArg(arg)
         else:
             genFactory.handleArg(arg)
+
+    generator = genFactory.getCombinedGenerator(gen=generator, preload=True)
     if not generator:
-        generator = genFactory.getCombinedGenerator()
-    if not generator:
-        pywikibot.output(
-            u'You have to specify the generator you want to use for the program!')
+        pywikibot.bot.suggest_help(missing_generator=True)
+        return False
     else:
-        pregenerator = pagegenerators.PreloadingGenerator(generator)
-        for page in pregenerator:
+        site.login()
+        for page in generator:
             pywikibot.output(page.title())
             if page.exists() and (page.namespace() == 6) \
                     and (not page.isRedirectPage()):
                 if isUncat(page):
                     addUncat(page)
+        return True
+
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,11 @@
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
+"""Family module for MediaWiki wiki."""
+#
+# (C) Pywikibot team, 2006-2015
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
 
 __version__ = '$Id$'
 
@@ -6,12 +13,9 @@ from pywikibot import family
 
 
 # The MediaWiki family
-# user-config.py: usernames['mediawiki']['mediawiki'] = 'User name'
-class Family(family.WikimediaFamily):
-    def __init__(self):
-        super(Family, self).__init__()
-        self.name = 'mediawiki'
+class Family(family.WikimediaFamily, family.SingleSiteFamily):
 
-        self.langs = {
-            'mediawiki': 'www.mediawiki.org',
-        }
+    """Family module for MediaWiki wiki."""
+
+    name = 'mediawiki'
+    domain = 'www.mediawiki.org'

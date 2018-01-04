@@ -1,46 +1,80 @@
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
+"""
+Test pwb.py.
+
+If pwb.py does not load python files as expected, more tests from coverage
+should be added locally.
+https://bitbucket.org/ned/coveragepy/src/default/tests/test_execfile.py
+"""
 #
-# (C) Pywikipedia bot team, 2007
+# (C) Pywikibot team, 2007-2014
 #
 # Distributed under the terms of the MIT license.
 #
-__version__ = '$Id$'
+from __future__ import absolute_import, unicode_literals
 
-import os
 import sys
-import subprocess
-import pywikibot
 
-from tests.utils import unittest
+from tests import join_tests_path, create_path_func
+from tests.utils import execute, execute_pwb
+from tests.aspects import unittest, PwbTestCase
 
-pypath = sys.executable
-basepath = os.path.split(os.path.split(__file__)[0])[0]
-pwbpath = os.path.join(basepath, 'pwb.py')
-testbasepath = os.path.join(basepath, 'tests', 'pwb')
+join_pwb_tests_path = create_path_func(join_tests_path, 'pwb')
 
 
-def check_output(command):
-    return subprocess.Popen(command, stdout=subprocess.PIPE).communicate()[0]
+class TestPwb(PwbTestCase):
+
+    """
+    Test pwb.py functionality.
+
+    This is registered as a Site test because it will not run
+    without a user-config.py
+    """
+
+    # site must be explicitly set for pwb tests. This test does not require
+    # network access, because tests/pwb/print_locals.py does not use
+    # handle_args, etc. so version.py doesnt talk on the network.
+    site = False
+    net = False
+
+    def _do_check(self, name):
+        package_name = 'tests.pwb.' + name
+        script_path = join_pwb_tests_path(name + '.py')
+
+        direct = execute([sys.executable, '-m', package_name])
+        vpwb = execute_pwb([script_path])
+        self.maxDiff = None
+        self.assertEqual(direct['stdout'], vpwb['stdout'])
+
+        return (direct, vpwb)
+
+    def test_env(self):
+        """
+        Test external environment of pywikibot.
+
+        Make sure the environment is not contaminated, and is the same as
+        the environment we get when directly running a script.
+        """
+        self._do_check('print_env')
+
+    def test_locals(self):
+        """
+        Test internal environment of pywikibot.
+
+        Make sure the environment is not contaminated, and is the same as
+        the environment we get when directly running a script.
+        """
+        self._do_check('print_locals')
+
+    def test_unicode(self):
+        """Test printing unicode in pywikibot."""
+        (direct, vpwb) = self._do_check('print_unicode')
+
+        self.assertEqual('Häuser', direct['stdout'].strip())
+        self.assertEqual('Häuser', direct['stderr'].strip())
+        self.assertEqual('Häuser', vpwb['stdout'].strip())
+        self.assertEqual('Häuser', vpwb['stderr'].strip())
 
 
-class TestPwb(unittest.TestCase):
-    def setUp(self):
-        self.oldenviron = os.environ.copy()
-        os.environ['PYWIKIBOT2_DIR'] = pywikibot.config.base_dir
-
-    def tearDown(self):
-        del os.environ['PYWIKIBOT2_DIR']
-        if 'PYWIKIBOT2_DIR' in self.oldenviron:
-            os.environ['PYWIKIBOT2_DIR'] = self.oldenviron['PYWIKIBOT2_DIR']
-
-    def testScriptEnvironment(self):
-        """Make sure the environment is not contaminated, and is the same as
-           the environment we get when directly running a script."""
-        test = os.path.join(testbasepath, 'print_locals.py')
-
-        direct = check_output([pypath, test])
-        vpwb = check_output([pypath, pwbpath, test])
-        self.assertEqual(direct, vpwb)
-
-if __name__ == "__main__":
+if __name__ == '__main__':  # pragma: no cover
     unittest.main(verbosity=10)
