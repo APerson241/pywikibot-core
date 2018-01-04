@@ -1,22 +1,40 @@
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
+"""Family module for Wikiversity."""
+#
+# (C) Pywikibot team, 2007-2017
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
+
 from pywikibot import family
 
 __version__ = '$Id$'
 
 
 # The Wikimedia family that is known as Wikiversity
-class Family(family.WikimediaFamily):
-    def __init__(self):
-        super(Family, self).__init__()
-        self.name = 'wikiversity'
+class Family(family.SubdomainFamily, family.WikimediaFamily):
 
+    """Family class for Wikiversity."""
+
+    name = 'wikiversity'
+
+    def __init__(self):
+        """Constructor."""
         self.languages_by_size = [
-            'en', 'fr', 'de', 'beta', 'cs', 'ru', 'it', 'pt', 'es', 'ar', 'fi',
-            'sv', 'el', 'sl', 'ko', 'ja',
+            'de', 'en', 'fr', 'ru', 'it', 'cs', 'beta', 'pt', 'es', 'ar', 'sv',
+            'fi', 'sl', 'el', 'hi', 'ja', 'ko',
         ]
 
-        self.langs = dict([(lang, '%s.wikiversity.org' % lang)
-                           for lang in self.languages_by_size])
+        super(Family, self).__init__()
 
-        # Global bot allowed languages on http://meta.wikimedia.org/wiki/Bot_policy/Implementation#Current_implementation
-        self.cross_allowed = ['ja', ]
+        self.category_redirect_templates = {
+            '_default': (),
+            'ar': ('قالب:تحويل تصنيف',),
+            'en': ('Category redirect',),
+        }
+
+        # Global bot allowed languages on
+        # https://meta.wikimedia.org/wiki/BPI#Current_implementation
+        # & https://meta.wikimedia.org/wiki/Special:WikiSets/2
+        self.cross_allowed = ['ja', 'ko', ]

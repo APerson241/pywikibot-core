@@ -1,4 +1,11 @@
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
+"""Family module for Wikitech."""
+#
+# (C) Pywikibot team, 2005-2015
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
 
 __version__ = '$Id$'
 
@@ -6,14 +13,13 @@ from pywikibot import family
 
 
 # The Wikitech family
-class Family(family.Family):
+class Family(family.WikimediaOrgFamily):
 
-    def __init__(self):
-        super(Family, self).__init__()
-        self.name = 'wikitech'
-        self.langs = {
-            'en': 'wikitech.wikimedia.org',
-        }
+    """Family class for Wikitech."""
 
-    def version(self, code):
-        return '1.21wmf8'
+    name = 'wikitech'
+    code = 'en'
+
+    def protocol(self, code):
+        """Return the protocol for this family."""
+        return 'https'

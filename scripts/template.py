@@ -1,8 +1,9 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-"""
-Very simple script to replace a template with another one,
-and to convert the old MediaWiki boilerplate format to the new template format.
+r"""
+Very simple script to replace a template with another one.
+
+It also converts the old MediaWiki boilerplate format to the new format.
 
 Syntax: python template.py [-remove] [xml[:filename]] oldTemplate [newTemplate]
 
@@ -12,11 +13,14 @@ them, and replace the template.
 
 Command line options:
 
--remove      Remove every occurence of the template from every article
+-remove      Remove every occurrence of the template from every article
 
 -subst       Resolves the template by putting its text directly into the
              article. This is done by changing {{...}} or {{msg:...}} into
-             {{subst:...}}
+             {{subst:...}}.
+             Substitution is not available inside <ref>...</ref>,
+             <gallery>...</gallery>, <poem>...</poem> and <pagelist ... />
+             tags.
 
 -assubst     Replaces the first argument as old template with the second
              argument as new template but substitutes it like -subst does.
@@ -24,29 +28,29 @@ Command line options:
              the same effect.
 
 -xml         retrieve information from a local dump
-             (http://download.wikimedia.org). If this argument isn\'t given,
+             (https://download.wikimedia.org). If this argument isn't given,
              info will be loaded from the maintenance page of the live wiki.
              argument can also be given as "-xml:filename.xml".
 
--user:       Only process pages edited by a given user
+-onlyuser:   Only process pages edited by a given user
 
 -skipuser:   Only process pages not edited by a given user
 
--timestamp:  (With -user or -skipuser). Only check for a user where his edit is
-             not older than the given timestamp. Timestamp must be writen in
-             MediaWiki timestamp format which is "%Y%m%d%H%M%S"
+-timestamp:  (With -onlyuser or -skipuser). Only check for a user where his
+             edit is not older than the given timestamp. Timestamp must be
+             writen in MediaWiki timestamp format which is "%Y%m%d%H%M%S".
              If this parameter is missed, all edits are checked but this is
              restricted to the last 100 edits.
 
--summary:    Lets you pick a custom edit summary.  Use quotes if edit summary
+-summary:    Lets you pick a custom edit summary. Use quotes if edit summary
              contains spaces.
 
 -always      Don't bother asking to confirm any of the changes, Just Do It.
 
--category:   Appends the given category to every page that is edited.  This is
+-addcat:     Appends the given category to every page that is edited. This is
              useful when a category is being broken out from a template
-             parameter or when templates are being upmerged but more information
-             must be preserved.
+             parameter or when templates are being upmerged but more
+             information must be preserved.
 
 other:       First argument is the old template name, second one is the new
              name.
@@ -59,7 +63,7 @@ Examples:
 If you have a template called [[Template:Cities in Washington]] and want to
 change it to [[Template:Cities in Washington state]], start
 
-    python template.py "Cities in Washington" "Cities in Washington state"
+    python pwb.py template "Cities in Washington" "Cities in Washington state"
 
 Move the page [[Template:Cities in Washington]] manually afterwards.
 
@@ -67,113 +71,93 @@ Move the page [[Template:Cities in Washington]] manually afterwards.
 If you have a template called [[Template:test]] and want to substitute it only
 on pages in the User: and User talk: namespaces, do:
 
-    python template.py test -subst -namespace:2 -namespace:3
+    python pwb.py template test -subst -namespace:2 -namespace:3
 
-Note that -namespace: is a global pywikipedia parameter
+Note that -namespace: is a global Pywikibot parameter
 
 
 This next example substitutes the template lived with a supplied edit summary.
 It only performs substitutions in main article namespace and doesn't prompt to
-start replacing. Note that -putthrottle: is a global pywikipedia parameter.
+start replacing. Note that -putthrottle: is a global Pywikibot parameter.
 
-    python template.py -putthrottle:30 -namespace:0 lived -subst -always
-        -summary:"ROBOT: Substituting {{lived}}, see [[WP:SUBST]]."
+    python pwb.py template -putthrottle:30 -namespace:0 lived -subst -always \
+        -summary:"BOT: Substituting {{lived}}, see [[WP:SUBST]]."
 
 
 This next example removes the templates {{cfr}}, {{cfru}}, and {{cfr-speedy}}
 from five category pages as given:
 
-    python template.py cfr cfru cfr-speedy -remove -always
-        -page:"Category:Mountain monuments and memorials" -page:"Category:Indian family names"
-        -page:"Category:Tennis tournaments in Belgium" -page:"Category:Tennis tournaments in Germany"
-        -page:"Category:Episcopal cathedrals in the United States"
+    python pwb.py template cfr cfru cfr-speedy -remove -always \
+        -page:"Category:Mountain monuments and memorials" \
+        -page:"Category:Indian family names" \
+        -page:"Category:Tennis tournaments in Belgium" \
+        -page:"Category:Tennis tournaments in Germany" \
+        -page:"Category:Episcopal cathedrals in the United States" \
         -summary:"Removing Cfd templates from category pages that survived."
 
 
 This next example substitutes templates test1, test2, and space test on all
-pages:
+user talk pages (namespace #3):
 
-    python template.py test1 test2 "space test" -subst -always
+    python pwb.py template test1 test2 "space test" -subst -ns:3 -always
 
 """
 #
 # (C) Daniel Herding, 2004
-# (C) Rob W.W. Hooft, 2003
-# (C) xqt, 2009-2011
-# (C) Pywikipedia team, 2004-2010
+# (C) Rob W.W. Hooft, 2003-2005
+# (C) xqt, 2009-2017
+# (C) Pywikibot team, 2004-2017
 #
 # Distributed under the terms of the MIT license.
 #
-__version__ = '$Id$'
-#
+from __future__ import absolute_import, unicode_literals
+
 import re
-import sys
-import string
+
+from warnings import warn
+
 import pywikibot
-from pywikibot import i18n
-from pywikibot import config, pagegenerators, catlib
-from scripts import replace
+
+from pywikibot import i18n, pagegenerators, textlib, Bot
+
+from pywikibot.exceptions import ArgumentDeprecationWarning
+from pywikibot.pagegenerators import XMLDumpPageGenerator
+from pywikibot.tools import deprecated
+
+from scripts.replace import ReplaceRobot as ReplaceBot
 
 
-def UserEditFilterGenerator(generator, username, timestamp=None, skip=False):
+@deprecated('XMLDumpPageGenerator')
+class XmlDumpTemplatePageGenerator(XMLDumpPageGenerator):
+
     """
-    Generator which will yield Pages depending of user:username is an Author of
-    that page (only looks at the last 100 editors).
-    If timestamp is set in MediaWiki format JJJJMMDDhhmmss, older edits are
-    ignored
-    If skip is set, pages edited by the given user are ignored otherwise only
-    pages edited by this user are given back
+    Generator which yields Pages that transclude a template.
 
+    These pages will be retrieved from a local XML dump file
+    (cur table), and may not still transclude the template.
     """
-    if timestamp:
-        ts = pywikibot.Timestamp.fromtimestampformat(timestamp)
-    for page in generator:
-        editors = page.getLatestEditors(limit=100)
-        found = False
-        for ed in editors:
-            uts = pywikibot.Timestamp.fromISOformat(ed['timestamp'])
-            if not timestamp or uts >= ts:
-                if username == ed['user']:
-                    found = True
-                    break
-            else:
-                break
-        if found and not skip or not found and skip:
-            yield page
-        else:
-            pywikibot.output(u'Skipping %s' % page.title(asLink=True))
 
-
-class XmlDumpTemplatePageGenerator:
-    """
-    Generator which will yield Pages to pages that might contain the chosen
-    template. These pages will be retrieved from a local XML dump file
-    (cur table).
-    """
     def __init__(self, templates, xmlfilename):
         """
-        Arguments:
-            * templateNames - A list of Page object representing the searched
-                              templates
-            * xmlfilename   - The dump's path, either absolute or relative
+        Constructor.
+
+        @param templateNames: A list of Page objects representing the searched
+            templates
+        @type templateNames: list
+        @param xmlfilename: The dump's path, either absolute or relative
+        @type xmlfilename: str
+
         """
-        raise NotImplementedError("Sorry, no XML reader in rewrite yet.")
         self.templates = templates
         self.xmlfilename = xmlfilename
-
-    def __iter__(self):
-        """Yield page objects until the entire XML dump has been read."""
-        from pywikibot import xmlreader
-        mysite = pywikibot.getSite()
-        dump = xmlreader.XmlDump(self.xmlfilename)
+        mysite = pywikibot.Site()
         # regular expression to find the original template.
         # {{vfd}} does the same thing as {{Vfd}}, so both will be found.
         # The old syntax, {{msg:vfd}}, will also be found.
-        # TODO: check site.nocapitalize()
         templatePatterns = []
         for template in self.templates:
-            templatePattern = template.titleWithoutNamespace()
-            if not pywikibot.getSite().nocapitalize:
+            templatePattern = template.title(withNamespace=False)
+            if mysite.namespaces[10].case == 'first-letter':
                 templatePattern = '[%s%s]%s' % (templatePattern[0].upper(),
                                                 templatePattern[0].lower(),
                                                 templatePattern[1:])
@@ -182,142 +166,149 @@ class XmlDumpTemplatePageGenerator:
         templateRegex = re.compile(
             r'\{\{ *([mM][sS][gG]:)?(?:%s) *(?P<parameters>\|[^}]+|) *}}'
             % '|'.join(templatePatterns))
-        for entry in dump.parse():
-            if templateRegex.search(entry.text):
-                page = pywikibot.Page(mysite, entry.title)
-                yield page
+
+        super(XmlDumpTemplatePageGenerator, self).__init__(
+            xmlfilename, site=mysite, text_predicate=templateRegex.search)
 
 
-class TemplateRobot:
-    """
-    This robot will load all pages yielded by a page generator and replace or
-    remove all occurences of the old template, or substitute them with the
-    template's text.
-    """
-    def __init__(self, generator, templates, subst=False, remove=False,
-                 editSummary='', acceptAll=False, addedCat=None):
+class TemplateRobot(ReplaceBot):
+
+    """This bot will replace, remove or subst all occurrences of a template."""
+
+    def __init__(self, generator, templates, **kwargs):
         """
-        Arguments:
-            * generator    - A page generator.
-            * replacements - A dictionary which maps old template names to
-                             their replacements. If remove or subst is True,
-                             it maps the names of the templates that should be
-                             removed/resolved to None.
-            * remove       - True if the template should be removed.
-            * subst        - True if the template should be resolved.
+        Constructor.
+
+        @param generator: the pages to work on
+        @type generator: iterable
+        @param templates: a dictionary which maps old template names to
+            their replacements. If remove or subst is True, it maps the
+            names of the templates that should be removed/resolved to None.
+        @type templates: dict
         """
-        self.generator = generator
+        self.availableOptions.update({
+            'subst': False,
+            'remove': False,
+            'summary': None,
+            'addedCat': None,
+        })
+
+        Bot.__init__(self, generator=generator, **kwargs)
+
         self.templates = templates
-        self.subst = subst
-        self.remove = remove
-        self.editSummary = editSummary
-        self.acceptAll = acceptAll
-        self.addedCat = addedCat
-        site = pywikibot.Site()
-        if self.addedCat:
-            self.addedCat = pywikibot.Category(
-                site, u'%s:%s' % (site.namespace(14), self.addedCat))
 
         # get edit summary message if it's empty
-        if (self.editSummary == ''):
-            Param = {'list': (', ').join(self.templates.keys()),
-                     'num': len(self.templates)}
-            if self.remove:
-                self.editSummary = i18n.twntranslate(
-                    site, 'template-removing', Param)
-            elif self.subst:
-                self.editSummary = i18n.twntranslate(
-                    site, 'template-substituting', Param)
-            else:
-                self.editSummary = i18n.twntranslate(
-                    site, 'template-changing', Param)
+        if not self.getOption('summary'):
+            comma = self.site.mediawiki_message('comma-separator')
+            params = {'list': comma.join(self.templates.keys()),
+                      'num': len(self.templates)}
 
-    def run(self):
-        """
-        Starts the robot's action.
-        """
-        # regular expression to find the original template.
-        # {{vfd}} does the same thing as {{Vfd}}, so both will be found.
-        # The old syntax, {{msg:vfd}}, will also be found.
-        # The group 'parameters' will either match the parameters, or an
-        # empty string if there are none.
+            if self.getOption('remove'):
+                self.options['summary'] = i18n.twtranslate(
+                    self.site, 'template-removing', params)
+            elif self.getOption('subst'):
+                self.options['summary'] = i18n.twtranslate(
+                    self.site, 'template-substituting', params)
+            else:
+                self.options['summary'] = i18n.twtranslate(
+                    self.site, 'template-changing', params)
 
         replacements = []
         exceptions = {}
-        site = pywikibot.getSite()
-        for old, new in self.templates.iteritems():
-            namespaces = list(site.namespace(10, all=True))
-            if not site.nocapitalize:
-                pattern = '[' + \
-                          re.escape(old[0].upper()) + \
-                          re.escape(old[0].lower()) + \
-                          ']' + re.escape(old[1:])
-            else:
-                pattern = re.escape(old)
-            pattern = re.sub(r'_|\\ ', r'[_ ]', pattern)
-            templateRegex = re.compile(r'\{\{ *(' + ':|'.join(namespaces) + \
-                                       r':|[mM][sS][gG]:)?' + pattern + \
-                                       r'(?P<parameters>\s*\|.+?|) *}}',
-                                       re.DOTALL)
+        builder = textlib._MultiTemplateMatchBuilder(self.site)
+        for old, new in self.templates.items():
+            templateRegex = builder.pattern(old)
 
-            if self.subst and self.remove:
+            if self.getOption('subst') and self.getOption('remove'):
                 replacements.append((templateRegex,
-                                     '{{subst:%s\g<parameters>}}' % new))
-                exceptions['inside-tags'] = ['ref', 'gallery']
-            elif self.subst:
+                                     r'{{subst:%s\g<parameters>}}' % new))
+                exceptions['inside-tags'] = ['ref', 'gallery', 'poem',
+                                             'pagelist', ]
+            elif self.getOption('subst'):
                 replacements.append((templateRegex,
-                                     '{{subst:%s\g<parameters>}}' % old))
-                exceptions['inside-tags'] = ['ref', 'gallery']
-            elif self.remove:
+                                     r'{{subst:%s\g<parameters>}}' % old))
+                exceptions['inside-tags'] = ['ref', 'gallery', 'poem',
+                                             'pagelist', ]
+            elif self.getOption('remove'):
+                separate_line_regex = re.compile(
+                    r'^[*#:]* *{0} *\n'.format(templateRegex.pattern),
+                    re.DOTALL | re.MULTILINE)
+                replacements.append((separate_line_regex, ''))
+
+                spaced_regex = re.compile(
+                    r' +{0} +'.format(templateRegex.pattern),
+                    re.DOTALL)
+                replacements.append((spaced_regex, ' '))
+
                 replacements.append((templateRegex, ''))
             else:
+                template = pywikibot.Page(self.site, new, ns=10)
+                if not template.exists():
+                    pywikibot.warning(u'Template "%s" does not exist.' % new)
+                    if not pywikibot.input_yn('Do you want to proceed anyway?',
+                                              default=False,
+                                              automatic_quit=False):
+                        continue
                 replacements.append((templateRegex,
-                                     '{{%s\g<parameters>}}' % new))
+                                     r'{{%s\g<parameters>}}' % new))
 
-        replaceBot = replace.ReplaceRobot(self.generator, replacements,
-                                          exceptions, acceptall=self.acceptAll,
-                                          addedCat=self.addedCat,
-                                          editSummary=self.editSummary)
-        replaceBot.run()
+        super(TemplateRobot, self).__init__(
+            generator, replacements, exceptions,
+            always=self.getOption('always'),
+            addedCat=self.getOption('addedCat'),
+            summary=self.getOption('summary'))
 
 
 def main(*args):
+    """
+    Process command line arguments and invoke bot.
+
+    If args is an empty list, sys.argv is used.
+
+    @param args: command line arguments
+    @type args: list of unicode
+    """
     templateNames = []
     templates = {}
-    subst = False
-    remove = False
-    namespaces = []
-    editSummary = ''
-    addedCat = ''
-    acceptAll = False
-    genFactory = pagegenerators.GeneratorFactory()
+    options = {}
     # If xmlfilename is None, references will be loaded from the live wiki.
     xmlfilename = None
     user = None
     skip = False
     timestamp = None
+
     # read command line parameters
-    for arg in pywikibot.handleArgs(*args):
+    local_args = pywikibot.handle_args(args)
+
+    # Avoid conflicts with pagegenerators.py parameters.
+    if any(arg.startswith('-category:') for arg in local_args):
+        warn('-category (to append a category to each edited page) has been'
+             ' renamed to -addcat; make sure you are using the correct param.',
+             ArgumentDeprecationWarning)
+
+    site = pywikibot.Site()
+    genFactory = pagegenerators.GeneratorFactory()
+    for arg in local_args:
         if arg == '-remove':
-            remove = True
+            options['remove'] = True
         elif arg == '-subst':
-            subst = True
+            options['subst'] = True
         elif arg == '-assubst':
-            subst = remove = True
-        elif arg == ('-always'):
-            acceptAll = True
+            options['subst'] = options['remove'] = True
+        elif arg == '-always':
+            options['always'] = True
         elif arg.startswith('-xml'):
             if len(arg) == 4:
                 xmlfilename = pywikibot.input(
                     u'Please enter the XML dump\'s filename: ')
             else:
                 xmlfilename = arg[5:]
-        elif arg.startswith('-category:'):
-            addedCat = arg[len('-category:'):]
+        elif arg.startswith('-addcat:'):
+            options['addedCat'] = arg[len('-addcat:'):]
         elif arg.startswith('-summary:'):
-            editSummary = arg[len('-summary:'):]
-        elif arg.startswith('-user:'):
-            user = arg[len('-user:'):]
+            options['summary'] = arg[len('-summary:'):]
+        elif arg.startswith('-onlyuser:'):
+            user = arg[len('-onlyuser:'):]
         elif arg.startswith('-skipuser:'):
             user = arg[len('-skipuser:'):]
             skip = True
@@ -325,11 +316,14 @@ def main(*args):
             timestamp = arg[len('-timestamp:'):]
         else:
             if not genFactory.handleArg(arg):
-                templateNames.append(
-                    pywikibot.Page(pywikibot.Site(), arg,
-                                   ns=10).title(withNamespace=False))
+                templateName = pywikibot.Page(site, arg, ns=10)
+                templateNames.append(templateName.title(withNamespace=False))
 
-    if subst ^ remove:
+    if not templateNames:
+        pywikibot.bot.suggest_help(missing_parameters=['templates'])
+        return False
+
+    if options.get('subst', False) ^ options.get('remove', False):
         for templateName in templateNames:
             templates[templateName] = None
     else:
@@ -337,41 +331,51 @@ def main(*args):
             for i in range(0, len(templateNames), 2):
                 templates[templateNames[i]] = templateNames[i + 1]
         except IndexError:
-            pywikibot.output(
-u'Unless using solely -subst or -remove, you must give an even number of template names.')
+            pywikibot.output('Unless using solely -subst or -remove, '
+                             'you must give an even number of template names.')
             return
 
     oldTemplates = []
-    ns = pywikibot.Site().template_namespace()
     for templateName in templates.keys():
-        oldTemplate = pywikibot.Page(pywikibot.Site(), templateName, ns=10)
+        oldTemplate = pywikibot.Page(site, templateName, ns=10)
         oldTemplates.append(oldTemplate)
 
     if xmlfilename:
-        gen = XmlDumpTemplatePageGenerator(oldTemplates, xmlfilename)
+        builder = textlib._MultiTemplateMatchBuilder(site)
+        predicate = builder.search_any_predicate(oldTemplates)
+
+        gen = XMLDumpPageGenerator(
+            xmlfilename, site=site, text_predicate=predicate)
     else:
         gen = genFactory.getCombinedGenerator()
+
     if not gen:
-        gens = []
         gens = [
-            pagegenerators.ReferringPageGenerator(t, onlyTemplateInclusion=True)
+            pagegenerators.ReferringPageGenerator(t,
+                                                  onlyTemplateInclusion=True)
             for t in oldTemplates
         ]
         gen = pagegenerators.CombinedPageGenerator(gens)
         gen = pagegenerators.DuplicateFilterPageGenerator(gen)
-
     if user:
-        gen = UserEditFilterGenerator(gen, user, timestamp, skip)
-    preloadingGen = pagegenerators.PreloadingGenerator(gen)
+        gen = pagegenerators.UserEditFilterGenerator(gen, user, timestamp,
+                                                     skip,
+                                                     max_revision_depth=100,
+                                                     show_filtered=True)
 
-    bot = TemplateRobot(preloadingGen, templates, subst, remove, editSummary,
-                        acceptAll, addedCat)
+    if not genFactory.gens:
+        # make sure that proper namespace filtering etc. is handled
+        gen = genFactory.getCombinedGenerator(gen)
+
+    if not genFactory.nopreload:
+        gen = pagegenerators.PreloadingGenerator(gen)
+
+    bot = TemplateRobot(gen, templates, site=site, **options)
     bot.run()
+
 
 if __name__ == "__main__":
     try:
         main()
     except Exception:
         pywikibot.error("Fatal error:", exc_info=True)
-    finally:
-        pywikibot.stopme()

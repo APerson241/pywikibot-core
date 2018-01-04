@@ -1,25 +1,41 @@
 # -*- coding: utf-8 -*-
-
-__version__ = '$Id$'
-
+"""Family module for Wikivoyage."""
+#
+# (C) Pywikibot team, 2012-2017
+#
+# Distributed under the terms of the MIT license.
+#
 # The new wikivoyage family that is hosted at wikimedia
+from __future__ import absolute_import, unicode_literals
 
 from pywikibot import family
 
+__version__ = '$Id$'
 
-class Family(family.WikimediaFamily):
+
+class Family(family.SubdomainFamily, family.WikimediaFamily):
+
+    """Family class for Wikivoyage."""
+
+    name = 'wikivoyage'
+
     def __init__(self):
-        super(Family, self).__init__()
-        self.name = 'wikivoyage'
+        """Constructor."""
         self.languages_by_size = [
-            'en', 'de', 'pt', 'it', 'nl', 'fr', 'pl', 'ru', 'es', 'vi', 'sv',
-            'he', 'ro', 'uk', 'el',
+            'en', 'de', 'fa', 'it', 'fr', 'pl', 'ru', 'nl', 'pt', 'zh', 'es',
+            'he', 'fi', 'vi', 'sv', 'el', 'ro', 'uk', 'hi',
         ]
 
-        self.langs = dict([(lang, '%s.wikivoyage.org' % lang)
-                           for lang in self.languages_by_size])
-        # Global bot allowed languages on http://meta.wikimedia.org/wiki/Bot_policy/Implementation#Current_implementation
-        self.cross_allowed = ['es', 'ru', ]
+        super(Family, self).__init__()
 
-    def shared_data_repository(self, code, transcluded=False):
-        return ('wikidata', 'wikidata')
+        self.category_redirect_templates = {
+            '_default': (),
+            'zh': ('分类重定向',),
+        }
+
+        # Global bot allowed languages on
+        # https://meta.wikimedia.org/wiki/BPI#Current_implementation
+        # & https://meta.wikimedia.org/wiki/Special:WikiSets/2
+        self.cross_allowed = [
+            'el', 'en', 'es', 'fa', 'ru',
+        ]

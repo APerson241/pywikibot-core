@@ -1,60 +1,65 @@
-# -*- coding: utf-8  -*-
+# -*- coding: utf-8 -*-
+"""Family module for Wikisource."""
+#
+# (C) Pywikibot team, 2004-2017
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
+
 from pywikibot import family
 
 __version__ = '$Id$'
 
 
 # The Wikimedia family that is known as Wikisource
-class Family(family.WikimediaFamily):
-    def __init__(self):
-        super(Family, self).__init__()
-        self.name = 'wikisource'
+class Family(family.SubdomainFamily, family.WikimediaFamily):
 
+    """Family class for Wikisource."""
+
+    name = 'wikisource'
+
+    closed_wikis = [
+        # https://noc.wikimedia.org/conf/highlight.php?file=closed.dblist
+        'ang', 'ht',
+    ]
+    removed_wikis = [
+        # https://noc.wikimedia.org/conf/highlight.php?file=deleted.dblist
+        'tokipona',
+    ]
+
+    def __init__(self):
+        """Constructor."""
         self.languages_by_size = [
-            'fr', 'en', 'de', 'ru', 'it', 'pl', 'zh', 'he', 'pt', 'es', 'sv',
-            'ca', 'fa', 'cs', 'hu', 'ar', 'ko', 'sl', 'te', 'fi', 'ro', 'vi',
-            'sa', 'el', 'sr', 'hr', 'bn', 'no', 'th', 'hy', 'is', 'nl', 'ml',
-            'la', 'ja', 'vec', 'gu', 'tr', 'eo', 'br', 'uk', 'mk', 'yi', 'ta',
-            'be', 'id', 'da', 'li', 'et', 'bg', 'as', 'mr', 'bs', 'sah', 'az',
-            'gl', 'kn', 'lt', 'cy', 'sk', 'zh-min-nan', 'fo',
+            'en', 'pl', 'ru', 'de', 'fr', 'zh', 'he', 'it', 'es', 'ar', 'cs',
+            'pt', 'www', 'fa', 'hu', 'ml', 'ko', 'sv', 'gu', 'sr', 'bn', 'sl',
+            'sa', 'te', 'el', 'ro', 'fi', 'uk', 'vi', 'ja', 'az', 'th', 'hy',
+            'ca', 'ta', 'kn', 'br', 'hr', 'nl', 'is', 'la', 'no', 'vec', 'eo',
+            'tr', 'be', 'et', 'mk', 'yi', 'id', 'da', 'bg', 'li', 'mr', 'as',
+            'or', 'bs', 'sah', 'lt', 'gl', 'sk', 'cy', 'pa', 'zh-min-nan',
+            'fo',
         ]
 
-        self.langs = dict([(lang, '%s.wikisource.org' % lang)
-                           for lang in self.languages_by_size])
-        self.langs['-'] = 'wikisource.org'
+        super(Family, self).__init__()
 
-        # Global bot allowed languages on http://meta.wikimedia.org/wiki/Bot_policy/Implementation#Current_implementation
+        self.category_redirect_templates = {
+            '_default': (),
+            'ar': ('قالب:تحويل تصنيف',),
+            'en': ('Category redirect',),
+            'ro': ('Redirect categorie',),
+            'zh': ('分類重定向',),
+        }
+
+        # All requests to 'mul.wikisource.org/*' are redirected to
+        # the main page, so using 'wikisource.org'
+        self.langs['mul'] = self.domain
+        self.languages_by_size.append('mul')
+
+        # Global bot allowed languages on
+        # https://meta.wikimedia.org/wiki/BPI#Current_implementation
         self.cross_allowed = [
             'ca', 'el', 'fa', 'it', 'ko', 'no', 'pl', 'vi', 'zh',
         ]
-
-        # Which languages have a special order for putting interlanguage links,
-        # and what order is it? If a language is not in interwiki_putfirst,
-        # alphabetical order on language code is used. For languages that are in
-        # interwiki_putfirst, interwiki_putfirst is checked first, and
-        # languages are put in the order given there. All other languages are
-        # put after those, in code-alphabetical order.
-        self.interwiki_putfirst = {
-            'en': self.alphabetic,
-            'fi': self.alphabetic,
-            'fr': self.alphabetic,
-            'he': ['en'],
-            'hu': ['en'],
-            'pl': self.alphabetic,
-            'simple': self.alphabetic
-        }
-
-        self.obsolete = {
-            'ang': None,  # http://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Old_English_Wikisource
-            'dk': 'da',
-            'ht': None,   # http://meta.wikimedia.org/wiki/Proposals_for_closing_projects/Closure_of_Haitian_Creole_Wikisource
-            'jp': 'ja',
-            'minnan': 'zh-min-nan',
-            'nb': 'no',
-            'tokipona': None,
-            'zh-tw': 'zh',
-            'zh-cn': 'zh'
-        }
 
         self.authornamespaces = {
             '_default': [0],
@@ -87,6 +92,35 @@ class Family(family.WikimediaFamily):
             'zh': [102],
         }
 
-        for key, values in self.authornamespaces.iteritems():
-            for item in values:
-                self.crossnamespace[item].update({key: self.authornamespaces})
+        # Subpages for documentation.
+        # TODO: List is incomplete, to be completed for missing languages.
+        # TODO: Remove comments for appropriate pages
+        self.doc_subpages = {
+            '_default': ((u'/doc', ),
+                         ['ar', 'as', 'az', 'bn', 'en', 'es',
+                          'et', 'gu', 'hu', 'it', 'ja', 'kn', 'ml',
+                          'mk', 'mr', 'pt', 'ro', 'sa', 'sah', 'ta',
+                          'te', 'th', 'vi']
+                         ),
+            'be': (u'/Дакументацыя', ),
+            'bn': (u'/নথি', ),
+            'br': (u'/diellerezh', ),
+            'de': (u'/Doku', u'/Meta'),
+            'el': (u'/τεκμηρίωση', ),
+            'eo': ('u/dokumentado', ),
+            # 'fa': (u'/صفحه الگو', ),
+            # 'fa': (u'/فضای‌نام توضیحات', ),
+            # 'fa': (u'/آغاز جعبه', ),
+            # 'fa': (u'/پایان جعبه۲', ),
+            # 'fa': (u'/آغاز جعبه۲', ),
+            # 'fa': (u'/پایان جعبه', ),
+            # 'fa': (u'/توضیحات', ),
+            'fr': (u'/documentation', ),
+            'id': (u'/dok', ),
+            'ko': (u'/설명문서', ),
+            'no': (u'/dok', ),
+            'ru': (u'/Документация', ),
+            'sl': (u'/dok', ),
+            'sv': (u'/dok', ),
+            'uk': (u'/документація', ),
+        }

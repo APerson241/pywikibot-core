@@ -1,9 +1,7 @@
 #!/usr/bin/python
-# -*- coding: utf-8  -*-
-
+# -*- coding: utf-8 -*-
 """
-This script goes over multiple pages of the home wiki, and reports invalid
-ISBN numbers.
+This script reports and fixes invalid ISBN numbers.
 
 Additionally, it can convert all ISBN-10 codes to the ISBN-13 format, and
 correct the ISBN format by placing hyphens.
@@ -11,12 +9,6 @@ correct the ISBN format by placing hyphens.
 These command line parameters can be used to specify which pages to work on:
 
 &params;
-
--namespace:n      Number or name of namespace to process. The parameter can be
-                  used multiple times. It works in combination with all other
-                  parameters, except for the -start parameter. If you e.g.
-                  want to iterate over all categories starting at M, use
-                  -start:Category:M.
 
 Furthermore, the following command line parameters are supported:
 
@@ -34,23 +26,46 @@ Furthermore, the following command line parameters are supported:
 
 -always           Don't prompt you for each replacement.
 
+-prop-isbn-10     Sets ISBN-10 property ID, so it's not tried to be found
+                  automatically.
+                  The usage is as follows: -prop-isbn-10:propid
+
+-prop-isbn-13     Sets ISBN-13 property ID. The format and purpose is the
+                  same as in -prop-isbn-10.
+
 """
+#
+# (C) Pywikibot team, 2009-2017
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
 
-__version__ = '$Id$'
-
-import sys
 import re
 
-import pywikibot
-from pywikibot import pagegenerators, i18n
+from functools import partial
 
+import pywikibot
+from pywikibot import i18n, pagegenerators, textlib, Bot, WikidataBot
+
+try:
+    import stdnum.isbn
+except ImportError:
+    try:
+        import isbnlib
+    except ImportError:
+        pass
+    try:
+        import isbn_hyphenate
+    except ImportError:
+        pass
 
 docuReplacements = {
     '&params;': pagegenerators.parameterHelp,
 }
 
-# Maps each group number to the list of its publisher number ranges.
-# Taken from http://www.isbn-international.org/converter/ranges.htm
+# Maps each group number to the list of its publisher number ranges. Taken from:
+# https://web.archive.org/web/20090823122028/http://www.isbn-international.org/converter/ranges.htm
 ranges = {
     '0': [  # English speaking area
         ('00', '19'),
@@ -1157,40 +1172,17 @@ ranges = {
 }
 
 
-class IsbnBot:
-    def __init__(self, generator):
-        self.generator = generator
-
-    def run(self):
-        for page in self.generator:
-            try:
-                text = page.get(get_redirect=self.touch_redirects)
-                # convert ISBN numbers
-                page.put(text)
-            except pywikibot.NoPage:
-                pywikibot.output(u"Page %s does not exist?!"
-                                 % page.title(asLink=True))
-            except pywikibot.IsRedirectPage:
-                pywikibot.output(u"Page %s is a redirect; skipping."
-                                 % page.title(asLink=True))
-            except pywikibot.LockedPage:
-                pywikibot.output(u"Page %s is locked?!"
-                                 % page.title(asLink=True))
-
-
 class InvalidIsbnException(pywikibot.Error):
-    """Invalid ISBN"""
+
+    """Invalid ISBN."""
 
 
-class ISBN:
-    """
-    Abstract superclass
-    """
+class ISBN(object):
+
+    """Abstract superclass."""
 
     def format(self):
-        """
-        Puts hyphens into this ISBN number.
-        """
+        """Put hyphens into this ISBN number."""
         result = ''
         rest = ''
         for digit in self.digits():
@@ -1203,24 +1195,26 @@ class ISBN:
                 break
 
         # Determine the group
-        for groupNumber in ranges.iterkeys():
+        for groupNumber in ranges.keys():
             if rest.startswith(groupNumber):
                 result += groupNumber + '-'
                 rest = rest[len(groupNumber):]
                 publisherRanges = ranges[groupNumber]
                 break
         else:
-            raise InvalidIsbnException('ISBN %s: group number unknown.' % self.code)
+            raise InvalidIsbnException('ISBN %s: group number unknown.'
+                                       % self.code)
 
         # Determine the publisher
         for (start, end) in publisherRanges:
             length = len(start)  # NOTE: start and end always have equal length
-            if rest[:length] > start and rest[:length] <= end:
+            if rest[:length] >= start and rest[:length] <= end:
                 result += rest[:length] + '-'
                 rest = rest[length:]
                 break
         else:
-            raise InvalidIsbnException('ISBN %s: publisher number unknown.' % self.code)
+            raise InvalidIsbnException('ISBN %s: publisher number unknown.'
+                                       % self.code)
 
         # The rest is the item number and the 1-digit checksum.
         result += rest[:-1] + '-' + rest[-1]
@@ -1228,35 +1222,46 @@ class ISBN:
 
 
 class ISBN13(ISBN):
+
+    """ISBN 13."""
+
     def __init__(self, code, checksumMissing=False):
+        """Constructor."""
         self.code = code
         if checksumMissing:
             self.code += str(self.calculateChecksum())
         self.checkValidity()
 
     def possiblePrefixes(self):
+        """Return possible prefixes."""
         return ['978', '979']
 
     def digits(self):
-        """
-        Returns a list of the digits in the ISBN code.
-        """
+        """Return a list of the digits in the ISBN code."""
         result = []
         for c in self.code:
             if c.isdigit():
                 result.append(int(c))
             elif c != '-':
-                raise InvalidIsbnException('The ISBN %s contains invalid characters.' % self.code)
+                raise InvalidIsbnException(
+                    'The ISBN %s contains invalid characters.' % self.code)
         return result
 
     def checkValidity(self):
+        """Check validity of ISBN."""
         if len(self.digits()) != 13:
-            raise InvalidIsbnException('The ISBN %s is not 13 digits long.' % self.code)
+            raise InvalidIsbnException('The ISBN %s is not 13 digits long.'
+                                       % self.code)
         if self.calculateChecksum() != self.digits()[-1]:
-            raise InvalidIsbnException('The ISBN checksum of %s is incorrect.' % self.code)
+            raise InvalidIsbnException('The ISBN checksum of %s is incorrect.'
+                                       % self.code)
 
     def calculateChecksum(self):
-        # See http://en.wikipedia.org/wiki/ISBN#Check_digit_in_ISBN_13
+        """
+        Calculate checksum.
+
+        See https://en.wikipedia.org/wiki/ISBN#Check_digit_in_ISBN_13
+        """
         sum = 0
         for i in range(0, 13 - 1, 2):
             sum += self.digits()[i]
@@ -1266,63 +1271,68 @@ class ISBN13(ISBN):
 
 
 class ISBN10(ISBN):
+
+    """ISBN 10."""
+
     def __init__(self, code):
+        """Constructor."""
         self.code = code
         self.checkValidity()
 
     def possiblePrefixes(self):
+        """Return possible prefixes."""
         return []
 
     def digits(self):
-        """
-        Returns a list of the digits and Xs in the ISBN code.
-        """
+        """Return a list of the digits and Xs in the ISBN code."""
         result = []
         for c in self.code:
             if c.isdigit() or c in 'Xx':
                 result.append(c)
             elif c != '-':
-                raise InvalidIsbnException('The ISBN %s contains invalid characters.' % self.code)
+                raise InvalidIsbnException(
+                    'The ISBN %s contains invalid characters.' % self.code)
         return result
 
     def checkChecksum(self):
-        """
-        Raises an InvalidIsbnException if the checksum shows that the
-        ISBN is incorrect.
-        """
-        # See http://en.wikipedia.org/wiki/ISBN#Check_digit_in_ISBN_10
+        """Raise an InvalidIsbnException if the ISBN checksum is incorrect."""
+        # See https://en.wikipedia.org/wiki/ISBN#Check_digit_in_ISBN_10
         sum = 0
         for i in range(0, 9):
             sum += (i + 1) * int(self.digits()[i])
-        #print sum
         checksum = sum % 11
-        #print checksum
         lastDigit = self.digits()[-1]
-        #print lastDigit
-        if not ((checksum == 10 and lastDigit in 'Xx') or (lastDigit.isdigit() and checksum == int(lastDigit))):
-            raise InvalidIsbnException('The ISBN checksum of %s is incorrect.' % self.code)
+        if not ((checksum == 10 and lastDigit in 'Xx') or
+                (lastDigit.isdigit() and checksum == int(lastDigit))):
+            raise InvalidIsbnException('The ISBN checksum of %s is incorrect.'
+                                       % self.code)
 
     def checkValidity(self):
+        """Check validity of ISBN."""
         if len(self.digits()) != 10:
-            raise InvalidIsbnException('The ISBN %s is not 10 digits long.' % self.code)
+            raise InvalidIsbnException('The ISBN %s is not 10 digits long.'
+                                       % self.code)
         if 'X' in self.digits()[:-1] or 'x' in self.digits()[:-1]:
-            raise InvalidIsbnException('ISBN %s: X is only allowed at the end of the ISBN.' % self.code)
+            raise InvalidIsbnException(
+                'ISBN %s: X is only allowed at the end of the ISBN.'
+                % self.code)
         self.checkChecksum()
 
     def toISBN13(self):
         """
-        Creates a 13-digit ISBN from this 10-digit ISBN by prefixing the GS1
-        prefix '978' and recalculating the checksum.
+        Create a 13-digit ISBN from this 10-digit ISBN.
+
+        Adds the GS1 prefix '978' and recalculates the checksum.
         The hyphenation structure is taken from the format of the original
         ISBN number.
+
+        @rtype: L{ISBN13}
         """
         code = '978-' + self.code[:-1]
-
-        #cs = self.calculateChecksum()
-        #code += str(cs)
         return ISBN13(code, checksumMissing=True)
 
     def format(self):
+        """Format ISBN number."""
         # load overridden superclass method
         ISBN.format(self)
         # capitalize checksum
@@ -1331,171 +1341,338 @@ class ISBN10(ISBN):
 
 
 def getIsbn(code):
+    """Return an ISBN object for the code."""
     try:
         i = ISBN13(code)
-    except InvalidIsbnException, e13:
+    except InvalidIsbnException as e13:
         try:
             i = ISBN10(code)
-        except InvalidIsbnException, e10:
-            raise InvalidIsbnException(u'ISBN-13: %s / ISBN-10: %s' % (e13, e10))
+        except InvalidIsbnException as e10:
+            raise InvalidIsbnException(u'ISBN-13: %s / ISBN-10: %s'
+                                       % (e13, e10))
     return i
 
 
-def _hyphenateIsbnNumber(match):
-    """
-    Helper function to deal with a single ISBN
-    """
-    code = match.group('code')
+def is_valid(isbn):
+    """Check whether an ISBN 10 or 13 is valid."""
+    # isbnlib marks any ISBN10 with lowercase 'X' as invalid
+    isbn = isbn.upper()
     try:
-        i = getIsbn(code)
+        stdnum.isbn
+    except NameError:
+        pass
+    else:
+        try:
+            stdnum.isbn.validate(isbn)
+        except stdnum.isbn.InvalidFormat as e:
+            raise InvalidIsbnException(str(e))
+        except stdnum.isbn.InvalidChecksum as e:
+            raise InvalidIsbnException(str(e))
+        except stdnum.isbn.InvalidLength as e:
+            raise InvalidIsbnException(str(e))
+        return True
+
+    try:
+        isbnlib
+    except NameError:
+        pass
+    else:
+        if isbnlib.notisbn(isbn):
+            raise InvalidIsbnException('Invalid ISBN found')
+        return True
+
+    getIsbn(isbn)
+    return True
+
+
+def _hyphenateIsbnNumber(match):
+    """Helper function to deal with a single ISBN."""
+    isbn = match.group('code')
+    isbn = isbn.upper()
+    try:
+        is_valid(isbn)
     except InvalidIsbnException:
-        # don't change
-        return code
+        return isbn
+
+    try:
+        stdnum.isbn
+    except NameError:
+        pass
+    else:
+        i = stdnum.isbn.format(isbn)
+        return i
+
+    try:
+        isbn_hyphenate
+    except NameError:
+        pass
+    else:
+        try:
+            i = isbn_hyphenate.hyphenate(isbn)
+        except (isbn_hyphenate.IsbnMalformedError,
+                isbn_hyphenate.IsbnUnableToHyphenateError):
+            return isbn
+        return i
+
+    i = getIsbn(isbn)
     i.format()
     return i.code
 
 
-def hyphenateIsbnNumbers(text):
-    isbnR = re.compile(r'(?<=ISBN )(?P<code>[\d\-]+[\dXx])')
-    text = isbnR.sub(_hyphenateIsbnNumber, text)
-    return text
+hyphenateIsbnNumbers = partial(textlib.reformat_ISBNs,
+                               match_func=_hyphenateIsbnNumber)
 
 
 def _isbn10toIsbn13(match):
-    """
-    Helper function to deal with a single ISBN
-    """
-    code = match.group('code')
+    """Helper function to deal with a single ISBN."""
+    isbn = match.group('code')
+    isbn = isbn.upper()
     try:
-        i = getIsbn(code)
+        stdnum.isbn
+    except NameError:
+        pass
+    else:
+        try:
+            is_valid(isbn)
+        except InvalidIsbnException:
+            return isbn
+        i = stdnum.isbn.to_isbn13(isbn)
+        return i
+
+    try:
+        isbnlib
+    except NameError:
+        pass
+    else:
+        try:
+            is_valid(isbn)
+        except InvalidIsbnException:
+            return isbn
+        # remove hyphenation, otherwise isbnlib.to_isbn13() returns None
+        i = isbnlib.canonical(isbn)
+        if i == isbn:
+            i13 = isbnlib.to_isbn13(i)
+            return i13
+        # add removed hyphenation
+        i13 = isbnlib.to_isbn13(i)
+        i13h = hyphenateIsbnNumbers('ISBN ' + i13)
+        return i13h[5:]
+
+    try:
+        is_valid(isbn)
     except InvalidIsbnException:
         # don't change
-        return code
-    i13 = i.toISBN13()
+        return isbn
+    i1x = getIsbn(isbn)
+    if not isinstance(i1x, ISBN13):
+        i13 = i1x.toISBN13()
+    else:
+        i13 = i1x
     return i13.code
 
 
 def convertIsbn10toIsbn13(text):
+    """Helper function to convert ISBN 10 to ISBN 13."""
     isbnR = re.compile(r'(?<=ISBN )(?P<code>[\d\-]+[Xx]?)')
     text = isbnR.sub(_isbn10toIsbn13, text)
     return text
 
 
-class IsbnBot:
-    def __init__(self, generator, to13=False, format=False, always=False):
+class IsbnBot(Bot):
+
+    """ISBN bot."""
+
+    def __init__(self, generator, **kwargs):
+        """Constructor."""
+        self.availableOptions.update({
+            'to13': False,
+            'format': False,
+        })
+        super(IsbnBot, self).__init__(**kwargs)
+
         self.generator = generator
-        self.to13 = to13
-        self.format = format
-        self.always = always
         self.isbnR = re.compile(r'(?<=ISBN )(?P<code>[\d\-]+[Xx]?)')
-        self.comment = i18n.twtranslate(pywikibot.getSite(), 'isbn-formatting')
+        self.comment = i18n.twtranslate(pywikibot.Site(), 'isbn-formatting')
 
     def treat(self, page):
+        """Treat a page."""
         try:
-            oldText = page.get()
-            for match in self.isbnR.finditer(oldText):
-                code = match.group('code')
+            old_text = page.get()
+            for match in self.isbnR.finditer(old_text):
+                isbn = match.group('code')
                 try:
-                    getIsbn(code)
-                except InvalidIsbnException, e:
+                    is_valid(isbn)
+                except InvalidIsbnException as e:
                     pywikibot.output(e)
 
-            newText = oldText
-            if self.to13:
-                newText = self.isbnR.sub(_isbn10toIsbn13, newText)
+            new_text = old_text
+            if self.getOption('to13'):
+                new_text = self.isbnR.sub(_isbn10toIsbn13, new_text)
 
-            if self.format:
-                newText = self.isbnR.sub(_hyphenateIsbnNumber, newText)
-            self.save(page, newText)
+            if self.getOption('format'):
+                new_text = self.isbnR.sub(_hyphenateIsbnNumber, new_text)
+            try:
+                self.userPut(page, page.text, new_text, summary=self.comment)
+            except pywikibot.EditConflict:
+                pywikibot.output(u'Skipping %s because of edit conflict'
+                                 % page.title())
+            except pywikibot.SpamfilterError as e:
+                pywikibot.output(
+                    u'Cannot change %s because of blacklist entry %s'
+                    % (page.title(), e.url))
+            except pywikibot.LockedPage:
+                pywikibot.output(u'Skipping %s (locked page)'
+                                 % page.title())
         except pywikibot.NoPage:
-            pywikibot.output(u"Page %s does not exist?!" % page.title(asLink=True))
+            pywikibot.output(u"Page %s does not exist"
+                             % page.title(asLink=True))
         except pywikibot.IsRedirectPage:
-            pywikibot.output(u"Page %s is a redirect; skipping." % page.title(asLink=True))
-        except pywikibot.LockedPage:
-            pywikibot.output(u"Page %s is locked?!" % page.title(asLink=True))
-
-    def save(self, page, text):
-        if text != page.get():
-            # Show the title of the page we're working on.
-            # Highlight the title in purple.
-            pywikibot.output(u"\n\n>>> \03{lightpurple}%s\03{default} <<<" % page.title())
-            pywikibot.showDiff(page.get(), text)
-            if not self.always:
-                choice = pywikibot.inputChoice(u'Do you want to accept these changes?', ['Yes', 'No', 'Always yes'], ['y', 'N', 'a'], 'N')
-                if choice == 'n':
-                    return
-                elif choice == 'a':
-                    self.always = True
-
-            if self.always:
-                try:
-                    page.put(text, comment=self.comment)
-                except pywikibot.EditConflict:
-                    pywikibot.output(u'Skipping %s because of edit conflict' % (page.title(),))
-                except pywikibot.SpamfilterError, e:
-                    pywikibot.output(u'Cannot change %s because of blacklist entry %s' % (page.title(), e.url))
-                except pywikibot.LockedPage:
-                    pywikibot.output(u'Skipping %s (locked page)' % (page.title(),))
-            else:
-                # Save the page in the background. No need to catch exceptions.
-                page.put(text, comment=self.comment, async=True)
+            pywikibot.output(u"Page %s is a redirect; skipping."
+                             % page.title(asLink=True))
 
     def run(self):
+        """Run the bot."""
         for page in self.generator:
             self.treat(page)
 
 
-def main():
-    #page generator
-    gen = None
-    # This temporary array is used to read the page title if one single
-    # page to work on is specified by the arguments.
-    pageTitle = []
-    # Which namespaces should be processed?
-    # default to [] which means all namespaces will be processed
-    namespaces = []
-    # This factory is responsible for processing command line arguments
-    # that are also used by other scripts and that determine on which pages
-    # to work on.
+class IsbnWikibaseBot(WikidataBot):
+
+    """ISBN bot to be run on Wikibase sites."""
+
+    use_from_page = None
+
+    def __init__(self, generator, **kwargs):
+        """Constructor."""
+        self.availableOptions.update({
+            'to13': False,
+            'format': False,
+        })
+        self.isbn_10_prop_id = kwargs.pop('prop-isbn-10', None)
+        self.isbn_13_prop_id = kwargs.pop('prop-isbn-13', None)
+
+        super(IsbnWikibaseBot, self).__init__(**kwargs)
+
+        self.generator = generator
+        if self.isbn_10_prop_id is None:
+            self.isbn_10_prop_id = self.get_property_by_name('ISBN-10')
+        if self.isbn_13_prop_id is None:
+            self.isbn_13_prop_id = self.get_property_by_name('ISBN-13')
+        self.comment = i18n.twtranslate(pywikibot.Site(), 'isbn-formatting')
+
+    def treat_page_and_item(self, page, item):
+        """Treat a page."""
+        change_messages = []
+        item.get()
+        if self.isbn_10_prop_id in item.claims:
+            for claim in item.claims[self.isbn_10_prop_id]:
+                isbn = claim.getTarget()
+                try:
+                    is_valid(isbn)
+                except InvalidIsbnException as e:
+                    pywikibot.output(e)
+                    continue
+
+                old_isbn = "ISBN " + isbn
+
+                if self.getOption('format'):
+                    new_isbn = hyphenateIsbnNumbers(old_isbn)
+
+                if self.getOption('to13'):
+                    new_isbn = convertIsbn10toIsbn13(old_isbn)
+
+                    item.claims[claim.getID()].remove(claim)
+                    claim = pywikibot.Claim(self.repo, self.isbn_13_prop_id)
+                    claim.setTarget(new_isbn)
+                    if self.isbn_13_prop_id in item.claims:
+                        item.claims[self.isbn_13_prop_id].append(claim)
+                    else:
+                        item.claims[self.isbn_13_prop_id] = [claim]
+                    change_messages.append('Changing %s (%s) to %s (%s)' %
+                                           (self.isbn_10_prop_id, old_isbn,
+                                            self.isbn_13_prop_id, new_isbn))
+                    continue
+
+                if old_isbn == new_isbn:
+                    continue
+                # remove 'ISBN ' prefix
+                assert new_isbn.startswith('ISBN '), 'ISBN should start with "ISBN"'
+                new_isbn = new_isbn[5:]
+                claim.setTarget(new_isbn)
+                change_messages.append('Changing %s (%s --> %s)' %
+                                       (self.isbn_10_prop_id, old_isbn,
+                                        new_isbn))
+
+        # -format is the only option that has any effect on ISBN13
+        if self.getOption('format') and self.isbn_13_prop_id in item.claims:
+            for claim in item.claims[self.isbn_13_prop_id]:
+                isbn = claim.getTarget()
+                try:
+                    is_valid(isbn)
+                except InvalidIsbnException as e:
+                    pywikibot.output(e)
+                    continue
+
+                old_isbn = "ISBN " + isbn
+                new_isbn = hyphenateIsbnNumbers(old_isbn)
+                if old_isbn == new_isbn:
+                    continue
+                change_messages.append(
+                    'Changing %s (%s --> %s)' % (self.isbn_13_prop_id,
+                                                 claim.getTarget(), new_isbn))
+                claim.setTarget(new_isbn)
+
+        if change_messages:
+            self.current_page = item
+            pywikibot.output('\n'.join(change_messages))
+            self.user_edit_entity(item, summary=self.comment)
+
+
+def main(*args):
+    """
+    Process command line arguments and invoke bot.
+
+    If args is an empty list, sys.argv is used.
+
+    @param args: command line arguments
+    @type args: list of unicode
+    """
+    options = {}
+
+    # Process global args and prepare generator args parser
+    local_args = pywikibot.handle_args(args)
     genFactory = pagegenerators.GeneratorFactory()
-    # Never ask before changing a page
-    always = False
-    to13 = False
-    format = False
 
-    for arg in pywikibot.handleArgs():
-        if arg.startswith('-namespace:'):
-            try:
-                namespaces.append(int(arg[11:]))
-            except ValueError:
-                namespaces.append(arg[11:])
-        elif arg == '-always':
-            always = True
-        elif arg == '-to13':
-            to13 = True
-        elif arg == '-format':
-            format = True
+    # Check whether we're running on Wikibase site or not
+    # FIXME: See T85483 and run() in WikidataBot
+    site = pywikibot.Site()
+    data_site = site.data_repository()
+    use_wikibase = (data_site is not None and
+                    data_site.family == site.family and
+                    data_site.code == site.code)
+
+    for arg in local_args:
+        if arg.startswith('-prop-isbn-10:'):
+            options[arg[1:len('-prop-isbn-10')]] = arg[len('-prop-isbn-10:'):]
+        elif arg.startswith('-prop-isbn-13:'):
+            options[arg[1:len('-prop-isbn-13')]] = arg[len('-prop-isbn-13:'):]
+        elif arg.startswith('-') and arg[1:] in ('always', 'to13', 'format'):
+            options[arg[1:]] = True
         else:
-            if not genFactory.handleArg(arg):
-                pageTitle.append(arg)
+            genFactory.handleArg(arg)
 
-    site = pywikibot.getSite()
-    site.login()
-    if pageTitle:
-        gen = iter([pywikibot.Page(pywikibot.Link(t, site)) for t in pageTitle])
-    if not gen:
-        gen = genFactory.getCombinedGenerator()
-    if not gen:
-        pywikibot.showHelp('isbn')
-    else:
-        if namespaces != []:
-            gen = pagegenerators.NamespaceFilterPageGenerator(gen, namespaces)
-        preloadingGen = pagegenerators.PreloadingGenerator(gen)
-        bot = IsbnBot(preloadingGen, to13=to13, format=format, always=always)
+    gen = genFactory.getCombinedGenerator(preload=True)
+    if gen:
+        if use_wikibase:
+            bot = IsbnWikibaseBot(gen, **options)
+        else:
+            bot = IsbnBot(gen, **options)
         bot.run()
+        return True
+    else:
+        pywikibot.bot.suggest_help(missing_generator=True)
+        return False
+
 
 if __name__ == "__main__":
-    try:
-        main()
-    finally:
-        pywikibot.stopme()
+    main()

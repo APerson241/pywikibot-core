@@ -1,124 +1,164 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 """
-Copyright (C) 2013 Legoktm
-Copyright (C) 2013 Pywikipediabot team
+A script that adds claims to Wikidata items based on a list of pages.
 
-Distributed under the MIT License
+These command line parameters can be used to specify which pages to work on:
+
+&params;
 
 Usage:
 
-python claimit.py [pagegenerators] P1 Q2 P123 Q456
+    python pwb.py claimit [pagegenerators] P1 Q2 P123 Q456
 
-You can use any typical pagegenerator to provide with a list of pages
+You can use any typical pagegenerator (like categories) to provide with a
+list of pages. Then list the property-->target pairs to add.
 
-Then list the property-->target pairs to add.
+For geographic coordinates:
+
+    python pwb.py claimit [pagegenerators] P625 [lat-dec],[long-dec],[prec]
+
+[lat-dec] and [long-dec] represent the latitude and longitude respectively,
+and [prec] represents the precision. All values are in decimal degrees,
+not DMS. If [prec] is omitted, the default precision is 0.0001 degrees.
+
+Example:
+
+    python pwb.py claimit [pagegenerators] P625 -23.3991,-52.0910,0.0001
+
+By default, claimit.py does not add a claim if one with the same property
+already exists on the page. To override this behavior, use the 'exists' option:
+
+    python pwb.py claimit [pagegenerators] P246 "string example" -exists:p
+
+Suppose the claim you want to add has the same property as an existing claim
+and the "-exists:p" argument is used. Now, claimit.py will not add the claim
+if it has the same target, source, and/or the existing claim has qualifiers.
+To override this behavior, add 't' (target), 's' (sources), or 'q' (qualifiers)
+to the 'exists' argument.
+
+For instance, to add the claim to each page even if one with the same
+property and target and some qualifiers already exists:
+
+    python pwb.py claimit [pagegenerators] P246 "string example" -exists:ptq
+
+Note that the ordering of the letters in the 'exists' argument does not matter,
+but 'p' must be included.
+
 """
-import json
+#
+# (C) Legoktm, 2013
+# (C) Pywikibot team, 2013-2017
+#
+# Distributed under the terms of the MIT license.
+#
+from __future__ import absolute_import, unicode_literals
+
 import pywikibot
-from pywikibot import pagegenerators
+from pywikibot import pagegenerators, WikidataBot
+
+# This is required for the text that is shown when you run this script
+# with the parameter -help or without parameters.
+docuReplacements = {
+    '&params;': pagegenerators.parameterHelp,
+}
 
 
-class ClaimRobot:
-    """
-    A bot to add Wikidata claims
-    """
-    def __init__(self, generator, claims):
+class ClaimRobot(WikidataBot):
+
+    """A bot to add Wikidata claims."""
+
+    use_from_page = None
+
+    def __init__(self, generator, claims, exists_arg=''):
         """
-        Arguments:
-            * generator    - A generator that yields Page objects.
-            * claims       - A list of wikidata claims
+        Constructor.
 
+        @param generator: A generator that yields Page objects.
+        @type generator: iterator
+        @param claims: A list of wikidata claims
+        @type claims: list
+        @param exists_arg: String specifying how to handle duplicate claims
+        @type exists_arg: str
         """
+        self.availableOptions['always'] = True
+        super(ClaimRobot, self).__init__()
         self.generator = generator
         self.claims = claims
-        self.repo = pywikibot.Site().data_repository()
+        self.exists_arg = ''.join(x for x in exists_arg.lower() if x in 'pqst')
         self.cacheSources()
+        if self.exists_arg:
+            pywikibot.output("'exists' argument set to '%s'" % self.exists_arg)
 
-    def getSource(self, lang):
-        """
-        Get the source for the specified language,
-        if possible
-        """
-        if lang in self.source_values:
-            source = pywikibot.Claim(self.repo, 'p143')
-            source.setTarget(self.source_values.get(lang))
-            return source
-
-    def cacheSources(self):
-        """
-        Fetches the sources from the onwiki list
-        and stores it internally
-        """
-        page = pywikibot.Page(self.repo, u'Wikidata:List of wikis/python')
-        self.source_values = json.loads(page.get())
-        self.source_values = self.source_values['wikipedia']
-        for source_lang in self.source_values:
-            self.source_values[source_lang] = pywikibot.ItemPage(self.repo,
-                                                                 self.source_values[source_lang])
-
-    def run(self):
-        """
-        Starts the robot.
-        """
-        for page in self.generator:
-            item = pywikibot.ItemPage.fromPage(page)
-            pywikibot.output('Processing %s' % page)
-            if not item.exists():
-                pywikibot.output('%s doesn\'t have a wikidata item :(' % page)
-                # TODO FIXME: We should provide an option to create the page
-            else:
-                for claim in self.claims:
-                    if claim.getID() in item.get().get('claims'):
-                        pywikibot.output(
-                            u'A claim for %s already exists. Skipping'
-                            % (claim.getID(),))
-                        #TODO FIXME: This is a very crude way of dupe checking
-                    else:
-                        pywikibot.output('Adding %s --> %s'
-                                         % (claim.getID(), claim.getTarget()))
-                        item.addClaim(claim)
-                        # A generator might yield pages from multiple languages
-                        source = self.getSource(page.site.language())
-                        if source:
-                            claim.addSource(source, bot=True)
-                        # TODO FIXME: We need to check that we aren't adding a
-                        # duplicate
+    def treat_page_and_item(self, page, item):
+        """Treat each page."""
+        for claim in self.claims:
+            # The generator might yield pages from multiple sites
+            self.user_add_claim_unless_exists(
+                item, claim, self.exists_arg, page.site)
 
 
-def main():
+def main(*args):
+    """
+    Process command line arguments and invoke bot.
+
+    If args is an empty list, sys.argv is used.
+
+    @param args: command line arguments
+    @type args: list of unicode
+    @rtype: bool
+    """
+    exists_arg = ''
+    commandline_claims = []
+
+    # Process global args and prepare generator args parser
+    local_args = pywikibot.handle_args(args)
     gen = pagegenerators.GeneratorFactory()
-    commandline_claims = list()
-    for arg in pywikibot.handleArgs():
+
+    for arg in local_args:
+        # Handle args specifying how to handle duplicate claims
+        if arg.startswith('-exists:'):
+            exists_arg = arg.split(':')[1]
+            continue
+        # Handle page generator args
         if gen.handleArg(arg):
             continue
         commandline_claims.append(arg)
     if len(commandline_claims) % 2:
-        raise ValueError  # or something.
-    claims = list()
+        pywikibot.error('Incomplete command line property-value pair.')
+        return False
 
+    claims = []
     repo = pywikibot.Site().data_repository()
-
-    for i in xrange(0, len(commandline_claims), 2):
+    for i in range(0, len(commandline_claims), 2):
         claim = pywikibot.Claim(repo, commandline_claims[i])
-        if claim.getType() == 'wikibase-item':
+        if claim.type == 'wikibase-item':
             target = pywikibot.ItemPage(repo, commandline_claims[i + 1])
-        elif claim.getType() == 'string':
+        elif claim.type == 'string':
             target = commandline_claims[i + 1]
+        elif claim.type == 'globe-coordinate':
+            coord_args = [float(c) for c in commandline_claims[i + 1].split(',')]
+            if len(coord_args) >= 3:
+                precision = coord_args[2]
+            else:
+                precision = 0.0001  # Default value (~10 m at equator)
+            target = pywikibot.Coordinate(coord_args[0], coord_args[1], precision=precision)
         else:
             raise NotImplementedError(
                 "%s datatype is not yet supported by claimit.py"
-                % claim.getType())
+                % claim.type)
         claim.setTarget(target)
         claims.append(claim)
 
     generator = gen.getCombinedGenerator()
     if not generator:
-        # FIXME: Should throw some help
-        return
+        pywikibot.bot.suggest_help(missing_generator=True)
+        return False
 
-    bot = ClaimRobot(generator, claims)
+    bot = ClaimRobot(generator, claims, exists_arg)
     bot.run()
+    return True
+
 
 if __name__ == "__main__":
     main()
